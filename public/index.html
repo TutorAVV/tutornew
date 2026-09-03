@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Репетитор — подготовка к ЕГЭ и ОГЭ на 80+ баллов | Онлайн-запись</title>
+<meta name="description" content="Подготовка к ЕГЭ и ОГЭ по математике, физике, русскому языку и другим предметам. Выберите удобное время и запишитесь онлайн за 1 минуту.">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+<header class="header" id="top">
+  <div class="wrap header-in">
+    <a class="logo" href="#top">🎓 <span id="logoName">Репетитор</span></a>
+    <nav class="nav" id="nav">
+      <a href="#subjects">Предметы</a>
+      <a href="#booking">Запись</a>
+      <a href="#how">Как проходит</a>
+      <a href="#prices">Цены</a>
+      <a href="#reviews">Отзывы</a>
+      <a href="#faq">Вопросы</a>
+    </nav>
+    <div class="header-cta">
+      <a class="btn btn-primary btn-sm" href="#booking">Записаться</a>
+      <button class="burger" id="burger" aria-label="Меню">☰</button>
+    </div>
+  </div>
+</header>
+
+<main>
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap hero-in">
+    <div class="hero-text">
+      <div class="badge">🔥 Набор на 2026/27 учебный год открыт</div>
+      <h1>Подготовка к <span class="grad">ЕГЭ и ОГЭ</span> на 80+ баллов</h1>
+      <p class="lead">Математика, физика, русский язык и другие предметы. Онлайн и очно. Первое пробное занятие — <b>бесплатно</b>.</p>
+      <div class="hero-btns">
+        <a class="btn btn-primary btn-lg" href="#booking">📅 Выбрать время</a>
+        <a class="btn btn-ghost btn-lg" href="#prices">Цены</a>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>9+</b><span>лет опыта</span></div>
+        <div class="stat"><b>300+</b><span>учеников</span></div>
+        <div class="stat"><b>82</b><span>средний балл ЕГЭ</span></div>
+      </div>
+    </div>
+    <div class="hero-card">
+      <div class="mini-card">
+        <div class="mini-head">📅 Ближайшие свободные окна</div>
+        <div id="heroSlots" class="hero-slots"><span class="muted">Загружаем…</span></div>
+        <a class="btn btn-primary btn-block" href="#booking">Записаться онлайн</a>
+        <div class="mini-note">Это займёт около минуты ⏱</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SUBJECTS -->
+<section class="section" id="subjects">
+  <div class="wrap">
+    <h2>Предметы</h2>
+    <p class="sub">Выберите предмет — свободное время подберём при записи</p>
+    <div class="chips" id="subjectChips"></div>
+    <div class="cards3" id="subjectCards"></div>
+  </div>
+</section>
+
+<!-- BOOKING -->
+<section class="section section-tint" id="booking">
+  <div class="wrap">
+    <h2>📅 Онлайн-запись</h2>
+    <p class="sub">Выберите предмет, дату и время — как в приложении. Это займёт около минуты.</p>
+
+    <div class="book">
+      <div class="book-main">
+        <div class="step">
+          <div class="step-title"><span class="step-n">1</span> Предмет</div>
+          <div class="chips chips-wrap" id="bookSubjects"></div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">2</span> Формат</div>
+          <div class="seg" id="formatSeg">
+            <button class="seg-btn active" data-format="online">💻 Онлайн</button>
+            <button class="seg-btn" data-format="offline">📍 Очно</button>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">3</span> Дата</div>
+          <div class="dates" id="dateStrip"></div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">4</span> Время <span class="muted-sm" id="slotsHint"></span></div>
+          <div class="slots" id="slotsGrid"></div>
+        </div>
+
+        <div class="step" id="formStep">
+          <div class="step-title"><span class="step-n">5</span> Ваши данные</div>
+          <div class="form">
+            <label>Имя ученика*
+              <input id="fName" type="text" placeholder="Например, Артём" autocomplete="name" maxlength="60">
+            </label>
+            <div class="row2">
+              <label>Телефон*
+                <input id="fPhone" type="tel" placeholder="+7 (___) ___-__-__" autocomplete="tel" inputmode="tel">
+              </label>
+              <label>Класс
+                <select id="fGrade">
+                  <option value="">—</option>
+                  <option>7 класс</option><option>8 класс</option><option>9 класс (ОГЭ)</option>
+                  <option>10 класс</option><option>11 класс (ЕГЭ)</option><option>Другое</option>
+                </select>
+              </label>
+            </div>
+            <label>Комментарий
+              <input id="fComment" type="text" placeholder="Цель, уровень, пожелания…" maxlength="200">
+            </label>
+            <div class="summary" id="bookSummary">Выберите дату и время ↑</div>
+            <button class="btn btn-primary btn-lg btn-block" id="bookBtn">✅ Записаться</button>
+            <div class="form-note">Нажимая кнопку, вы соглашаетесь на обработку персональных данных. Перезвоним для подтверждения.</div>
+            <div class="form-err" id="formErr"></div>
+          </div>
+        </div>
+
+        <div class="success hidden" id="bookSuccess">
+          <div class="success-emoji">🎉</div>
+          <h3>Вы записаны!</h3>
+          <p id="successText"></p>
+          <div class="success-btns">
+            <a class="btn btn-ghost" href="#booking" id="againBtn">Записать ещё</a>
+            <a class="btn btn-primary" href="#top">На главную</a>
+          </div>
+        </div>
+      </div>
+
+      <aside class="book-side">
+        <div class="side-card">
+          <h4>💡 Как это работает</h4>
+          <ol class="side-list">
+            <li>Выбираете время кнопками выше</li>
+            <li>Оставляете имя и телефон</li>
+            <li>Перезваниваем за 15 минут и подтверждаем</li>
+            <li>Присылаем ссылку / адрес</li>
+          </ol>
+        </div>
+        <div class="side-card">
+          <h4>🎁 Пробное занятие — 0 ₽</h4>
+          <p class="muted">Диагностика уровня, план подготовки и знакомство. Ни к чему не обязывает.</p>
+        </div>
+        <div class="side-card" id="tgCard">
+          <h4>📱 Удобно в Telegram</h4>
+          <p class="muted">Откройте эту же страницу в боте — вид адаптируется под телефон.</p>
+          <button class="btn btn-ghost btn-block" id="openTgBtn">Открыть в Telegram</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- HOW -->
+<section class="section" id="how">
+  <div class="wrap">
+    <h2>Как проходят занятия</h2>
+    <div class="cards3">
+      <div class="card"><div class="card-emoji">🎯</div><h3>Диагностика</h3><p class="muted">Находим пробелы тестом и разбираем цели: нужный балл, вуз, сроки.</p></div>
+      <div class="card"><div class="card-emoji">📋</div><h3>Личный план</h3><p class="muted">План до экзамена по неделям + домашка с проверкой после каждого занятия.</p></div>
+      <div class="card"><div class="card-emoji">📈</div><h3>Контроль прогресса</h3><p class="muted">Пробники каждый месяц, отчёт родителям и разбор ошибок.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICES -->
+<section class="section section-tint" id="prices">
+  <div class="wrap">
+    <h2>Цены</h2>
+    <p class="sub">Пробное занятие — бесплатно. При абонементе на месяц — скидка 15%.</p>
+    <div class="cards3">
+      <div class="card price"><h3>Индивидуально</h3><div class="price-v">1 500 ₽<span>/ 60 мин</span></div><ul><li>1 на 1 с преподавателем</li><li>Личный план и домашка</li><li>Онлайн или очно</li></ul><a class="btn btn-primary btn-block" href="#booking">Выбрать время</a></div>
+      <div class="card price hot"><div class="hot-badge">Хит</div><h3>Мини-группа</h3><div class="price-v">900 ₽<span>/ 90 мин</span></div><ul><li>2–4 ученика одного уровня</li><li>Соревновательный дух</li><li>Общий чат поддержки</li></ul><a class="btn btn-primary btn-block" href="#booking">Выбрать время</a></div>
+      <div class="card price"><h3>Абонемент · 8 занятий</h3><div class="price-v">10 200 ₽<span>/ вместо 12 000 ₽</span></div><ul><li>Фиксированные слоты за вами</li><li>Заморозка при болезни</li><li>Отчёт родителям</li></ul><a class="btn btn-primary btn-block" href="#booking">Выбрать время</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- REVIEWS -->
+<section class="section" id="reviews">
+  <div class="wrap">
+    <h2>Отзывы</h2>
+    <div class="cards3">
+      <div class="card"><p>«Сдала ЕГЭ по математике на 84, хотя в 10 классе еле тянула на тройку. Спасибо за систему и поддержку!»</p><div class="who">— Алиса, 11 класс ⭐⭐⭐⭐⭐</div></div>
+      <div class="card"><p>«Сын занимался физикой онлайн. Удобная запись, напоминания, пробники каждый месяц. ОГЭ — на 5.»</p><div class="who">— Марина, мама ученика ⭐⭐⭐⭐⭐</div></div>
+      <div class="card"><p>«Готовился к информатике с нуля за полгода — 78 баллов. Домашку проверяют быстро, всё по делу.»</p><div class="who">— Тимур, 11 класс ⭐⭐⭐⭐⭐</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="section section-tint" id="faq">
+  <div class="wrap narrow">
+    <h2>Частые вопросы</h2>
+    <details class="faq" open><summary>Первое занятие правда бесплатное?</summary><p>Да. 30–40 минут: диагностика, план подготовки и ответы на вопросы. Если не подойдём — просто разойдёмся друзьями.</p></details>
+    <details class="faq"><summary>Онлайн или очно — что лучше?</summary><p>Онлайн — с интерактивной доской и записью занятия. Очно — если вы рядом. Результат одинаковый, выбирайте как удобно.</p></details>
+    <details class="faq"><summary>Что если не получится прийти?</summary><p>Предупредите за 3+ часа — перенесём без потери оплаты. Абонемент можно заморозить.</p></details>
+    <details class="faq"><summary>Как происходит оплата?</summary><p>После подтверждения записи — картой или СБП. Абонемент — раз в месяц со скидкой 15%.</p></details>
+    <details class="faq"><summary>А если мы пропустили много тем?</summary><p>Это нормально. На диагностике найдём пробелы и встроим их повторение в план — без паники.</p></details>
+  </div>
+</section>
+
+<!-- CONTACTS -->
+<section class="section" id="contacts">
+  <div class="wrap narrow center">
+    <h2>Остались вопросы?</h2>
+    <p class="sub">Напишите — ответим в течение часа в рабочее время (10:00–21:00 МСК)</p>
+    <div class="hero-btns center">
+      <a class="btn btn-primary btn-lg" href="#booking">📅 Записаться</a>
+      <a class="btn btn-ghost btn-lg" id="contactTg" href="#" target="_blank" rel="noopener">💬 Telegram</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-in">
+    <div>🎓 <span id="footName">Репетитор</span> · подготовка к ЕГЭ и ОГЭ</div>
+    <div class="footer-links"><a href="#booking">Запись</a><a href="/admin.html">Вход для админа</a></div>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>

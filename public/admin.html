@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Админ-панель — записи</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠</text></svg>">
+</head>
+<body>
+<div class="admin-wrap">
+  <div id="loginView">
+    <div class="login-card">
+      <div style="font-size:44px">🔐</div>
+      <h2>Админ-панель</h2>
+      <p class="muted">Введите пароль администратора.<br>По умолчанию: <span class="kbd">admin123</span> (задаётся в Render → Environment → ADMIN_KEY)</p>
+      <div class="form" style="text-align:left">
+        <label>Пароль<input id="adminPass" type="password" placeholder="••••••••" autocomplete="current-password"></label>
+        <button class="btn btn-primary btn-block" id="loginBtn">Войти</button>
+        <div class="form-err" id="loginErr"></div>
+      </div>
+      <p><a href="/" class="muted">← На сайт</a></p>
+    </div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <div class="admin-top">
+      <h1>🛠 Записи <span class="muted-sm" id="storageBadge"></span></h1>
+      <div class="spacer"></div>
+      <a class="mini-btn" id="sheetLink" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none">📊 Google Таблица</a>
+      <a class="mini-btn" href="/" style="text-decoration:none">← На сайт</a>
+      <button class="mini-btn" id="logoutBtn">Выйти</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="bookings">📋 Заявки</button>
+      <button class="tab" data-tab="slots">🕒 Слоты</button>
+      <button class="tab" data-tab="help">❓ Настройка</button>
+    </div>
+
+    <div class="panel" id="tab-bookings">
+      <div class="toolbar">
+        <select id="fStatus">
+          <option value="">Все статусы</option>
+          <option value="new">Новые</option>
+          <option value="confirmed">Подтверждённые</option>
+          <option value="done">Завершённые</option>
+          <option value="cancelled">Отменённые</option>
+        </select>
+        <input id="fSearch" type="text" placeholder="Поиск: имя, телефон, предмет…">
+        <button class="mini-btn" id="reloadBookings">🔄 Обновить</button>
+        <button class="mini-btn" id="exportCsv">⬇ CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="tbl" id="bookTable">
+        <thead><tr><th>Дата/время</th><th>Ученик</th><th>Предмет</th><th>Статус</th><th>Действия</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted">Загрузка…</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="panel hidden" id="tab-slots">
+      <div class="toolbar">
+        <input id="slotDate" type="date">
+        <button class="mini-btn" id="loadDay">Показать</button>
+        <span class="muted-sm">Добавить слот:</span>
+        <input id="newTime" type="time" value="17:00">
+        <select id="newFormat"><option value="online">💻 онлайн</option><option value="offline">📍 очно</option></select>
+        <button class="mini-btn" id="addSlot">＋ Добавить</button>
+      </div>
+      <div id="daySlots" class="slots" style="margin-bottom:18px"></div>
+      <details class="faq">
+        <summary>⚡ Сгенерировать слоты на период</summary>
+        <div class="toolbar" style="margin-top:12px">
+          <input id="genFrom" type="date"> — <input id="genTo" type="date">
+          <input id="genTimes" type="text" placeholder="15:00,16:00,17:00,18:00" style="min-width:220px">
+          <select id="genFormat"><option value="online">💻 онлайн</option><option value="offline">📍 очно</option></select>
+          <button class="mini-btn" id="genBtn">Сгенерировать</button>
+        </div>
+        <div class="muted-sm">Пример: с 08.09 по 14.09, время через запятую. Повторные слоты не дублируются.</div>
+      </details>
+    </div>
+
+    <div class="panel hidden" id="tab-help">
+      <h3>Где лежат данные</h3>
+      <p id="storageText" class="muted"></p>
+      <h3>Подключение Google Таблицы (5 минут)</h3>
+      <ol class="side-list">
+        <li>Создайте Google Таблицу, скопируйте её ID из ссылки.</li>
+        <li>Откройте <b>Расширения → Apps Script</b>, вставьте код из файла <span class="kbd">google-apps-script/Code.gs</span> в репозитории.</li>
+        <li>Заполните <span class="kbd">SHEET_ID</span>, <span class="kbd">API_SECRET</span>, (необязательно <span class="kbd">BOT_TOKEN</span>, <span class="kbd">ADMIN_CHAT_ID</span>).</li>
+        <li><b>Развернуть → Новое развертывание → Веб-приложение</b>, доступ «Все».</li>
+        <li>URL вставьте в Render → Environment → <span class="kbd">APPS_SCRIPT_URL</span>, секрет — в <span class="kbd">API_SECRET</span>, перезапустите сервис.</li>
+      </ol>
+      <h3>Telegram-бот (кнопка с сайтом)</h3>
+      <ol class="side-list">
+        <li>Напишите <b>@BotFather</b> → <span class="kbd">/newbot</span>, заберите токен → в <span class="kbd">BOT_TOKEN</span>.</li>
+        <li>Узнайте свой chat id через <b>@userinfobot</b> → в <span class="kbd">ADMIN_CHAT_ID</span> (сюда придут заявки).</li>
+        <li>В BotFather: <span class="kbd">/setmenubutton</span> → выберите бота → вставьте адрес сайта на Render. Готово: в боте появится кнопка «Открыть запись».</li>
+      </ol>
+      <p class="muted">Подробно — в <span class="kbd">README.md</span> репозитория.</p>
+    </div>
+  </div>
+</div>
+<script src="/admin.js"></script>
+</body>
+</html>
