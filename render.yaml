@@ -26,4 +26,10 @@ services:
       - key: TUTOR_PHONE
         sync: false
       - key: TUTOR_SUBJECTS
-        value: Математика,Физика,Русский язык,Обществознание,Информатика,Английский язык
+        value: Математика,Физика
+      - key: TZ_LABEL
+        value: МСК+2
+      - key: TUTOR_TG
+        value: aviation09
+      - key: LESSON_DURATION
+        value: "50"

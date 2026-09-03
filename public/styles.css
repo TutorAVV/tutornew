@@ -162,6 +162,28 @@ table.tbl{width:100%;border-collapse:collapse;font-size:14px}
 .kbd{background:#f1f3fb;border:1px solid var(--line);border-radius:6px;padding:1px 7px;font-size:12px;font-family:monospace}
 pre.code{background:#0f1530;color:#dbe4ff;border-radius:12px;padding:14px;overflow:auto;font-size:12.5px}
 
+/* my bookings */
+.panel-lite{background:#fff;border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 4px 14px rgba(20,26,51,.05)}
+.my-row{display:flex;gap:10px}
+.my-row input{flex:1;border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font-size:16px;font-family:inherit}
+.my-item{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:10px}
+.theme-btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted)}
+.theme-btn:hover{color:var(--brand);border-color:var(--brand)}
+
+/* dark theme (как на старом сайте) */
+body.dark{--bg:#0f1428;--tint:#151b36;--ink:#eef0ff;--muted:#9aa3c7;--card:#1a2140;--line:#2a3363}
+body.dark .header{background:rgba(15,20,40,.9)}
+body.dark .logo{color:var(--ink)}
+body.dark .form input,body.dark .form select,body.dark .my-row input{background:#10173a;color:var(--ink)}
+body.dark .chip,body.dark .date-btn,body.dark .slot,body.dark .burger,body.dark .theme-btn{background:#1a2140;color:var(--ink)}
+body.dark .seg{background:#10173a}
+body.dark .seg-btn.active{background:#2a3363;color:#fff}
+body.dark .slot:disabled{background:#141a33}
+body.dark .faq summary{color:var(--ink)}
+body.dark .tbl th{color:var(--muted)}
+body.dark .mini-btn,body.dark .tab,body.dark .toolbar input,body.dark .toolbar select{background:#1a2140;color:var(--ink);border-color:var(--line)}
+body.dark .tab.active{background:#eef0ff;color:#0f1428}
+
 /* responsive */
 @media(max-width:900px){
   .hero-in{grid-template-columns:1fr}
@@ -175,4 +197,5 @@ pre.code{background:#0f1530;color:#dbe4ff;border-radius:12px;padding:14px;overfl
   .book-main{padding:20px}
   .row2{grid-template-columns:1fr}
   .slots{grid-template-columns:repeat(2,1fr)}
+  .my-row{flex-direction:column}
 }
