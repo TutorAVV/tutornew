@@ -1,32 +1,22 @@
-/* Сайт: слоты-кнопки, запись, мои записи (перезапись), тема */
+/* Telegram WebApp: слоты-кнопки, запись, haptic, source: telegram */
 (function () {
   "use strict";
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => Array.from(document.querySelectorAll(s));
 
+  const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+
   const state = {
     subjects: ["Математика", "Физика"],
     subject: "", dates: [], date: "", slots: [], time: "",
     booking: false, tutorName: "Онлайн-уроки",
-    tzLabel: "МСК+2", tutorTg: "aviation09", chatId: "",
+    tzLabel: "МСК+2", chatId: "",
   };
 
   const EMOJI = { "Математика": "📐", "Физика": "⚛️" };
   const emojiFor = (s) => EMOJI[s] || "📚";
-
-  // ---------- theme ----------
-  function initTheme() {
-    const btn = $("#themeBtn");
-    const saved = localStorage.getItem("theme");
-    if (saved === "dark") document.body.classList.add("dark");
-    const paint = () => { if (btn) btn.textContent = document.body.classList.contains("dark") ? "☀️ Светлая тема" : "🌙 Тёмная тема"; };
-    paint();
-    if (btn) btn.onclick = () => {
-      document.body.classList.toggle("dark");
-      localStorage.setItem("theme", document.body.classList.contains("dark") ? "dark" : "light");
-      paint();
-    };
-  }
+  const haptic = (t) => { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred(t); } catch (e) {} };
 
   // ---------- dates ----------
   function fmtDate(ds) {
@@ -40,7 +30,6 @@
   function fmtLong(ds) {
     return new Date(ds + "T00:00:00").toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   }
-  function dsp(iso) { return iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4); }
 
   // ---------- subjects ----------
   function renderSubjects() {
@@ -106,6 +95,7 @@
         if (b.disabled) return;
         state.time = b.dataset.t;
         $$("#slotsGrid .slot").forEach((x) => x.classList.toggle("selected", x === b));
+        try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {}
         updateSummary();
       });
     }
@@ -124,6 +114,10 @@
       if (!state.time) need.push("время");
       el.textContent = need.length ? `Выберите ${need.join(" и ")} ↑` : "Заполните имя и телефон ↓";
     }
+    if (tg && tg.MainButton) {
+      if (state.subject && state.date && state.time) { tg.MainButton.setText("Записаться ✅"); tg.MainButton.show(); }
+      else tg.MainButton.hide();
+    }
   }
 
   // ---------- booking ----------
@@ -137,35 +131,41 @@
     const phone = $("#fPhone").value.trim();
     const grade = $("#fGrade").value;
     const comment = $("#fComment").value.trim();
-    if (!state.subject) { setErr("Выберите предмет (шаг 1)"); return; }
-    if (!state.time) { setErr("Выберите время (шаг 3)"); return; }
-    if (name.length < 2) { setErr("Укажите фамилию и имя"); $("#fName").focus(); return; }
-    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setErr("Проверьте email"); $("#fEmail").focus(); return; }
-    if (phone.replace(/\D/g, "").length < 10) { setErr("Проверьте номер телефона"); $("#fPhone").focus(); return; }
+    if (!state.subject) { setErr("Выберите предмет (шаг 1)"); haptic("error"); return; }
+    if (!state.time) { setErr("Выберите время (шаг 3)"); haptic("error"); return; }
+    if (name.length < 2) { setErr("Укажите фамилию и имя"); $("#fName").focus(); haptic("error"); return; }
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setErr("Проверьте email"); $("#fEmail").focus(); haptic("error"); return; }
+    if (phone.replace(/\D/g, "").length < 10) { setErr("Проверьте номер телефона"); $("#fPhone").focus(); haptic("error"); return; }
 
     state.booking = true;
     const btn = $("#bookBtn");
     btn.disabled = true; btn.textContent = "Записываем… ⏳";
     try {
+      let contact = "";
+      if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        const u = tg.initDataUnsafe.user;
+        contact = "tg:" + (u.username ? "@" + u.username : "id" + u.id);
+      }
       const r = await fetch("/api/book", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           date: state.date, time: state.time, subject: state.subject,
-          name, email, phone, grade, comment, contact: "",
-          chatId: "", source: "site",
+          name, email, phone, grade, comment, contact,
+          chatId: state.chatId, source: "telegram",
         }),
       });
       const data = await r.json();
       if (!data.ok) throw new Error(data.error || "Не получилось записать");
+      haptic("success");
       $("#formStep").classList.add("hidden");
       const s = $("#bookSuccess");
       s.classList.remove("hidden");
       $("#successText").textContent =
-        `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}). Подтверждение придет на ${phone}.`;
-      $("#remindNote").textContent = "💡 Запись с сайта успешно оформлена. Для автоматических напоминаний в Telegram открывайте расписание через наш Telegram-бот.";
+        `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}).`;
+      if (tg) { try { tg.MainButton.hide(); tg.showAlert("Вы записаны! 🎉"); } catch (e) {} }
       s.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) {
-      setErr(e.message);
+      setErr(e.message); haptic("error");
       loadSlots();
     } finally {
       state.booking = false;
@@ -173,83 +173,37 @@
     }
   }
 
-  // ---------- my bookings ----------
-  async function myFind() {
-    const phone = $("#myPhone").value.trim();
-    const err = $("#myErr"), list = $("#myList");
-    err.textContent = ""; list.innerHTML = "";
-    if (phone.replace(/\D/g, "").length < 10) { err.textContent = "Введите номер телефона из заявки"; return; }
-    list.innerHTML = `<div class="muted">Ищем… ⏳</div>`;
-    try {
-      const r = await fetch(`/api/my?phone=${encodeURIComponent(phone)}`);
-      const data = await r.json();
-      if (!data.ok) throw new Error(data.error || "Не получилось найти");
-      if (!data.bookings.length) {
-        list.innerHTML = `<div class="muted">Будущих записей на этот номер нет. Запишитесь выше 👆</div>`;
-        return;
-      }
-      list.innerHTML = data.bookings.map((b) => `
-        <div class="my-item">
-          <div><b>${b.subject || ""}</b> · ${dsp(b.iso || b.date)} в ${b.time} (${state.tzLabel})</div>
-          <button class="mini-btn danger" data-cancel="${b.id}">Отменить</button>
-        </div>`).join("") +
-        `<div class="muted-sm" style="margin-top:8px">Чтобы перезаписаться: отмените запись и выберите новое время выше 👆</div>`;
-      $$("#myList [data-cancel]").forEach((btn) => btn.onclick = () => myCancel(btn.dataset.cancel, phone));
-    } catch (e) { err.textContent = e.message; list.innerHTML = ""; }
-  }
-
-  async function myCancel(id, phone) {
-    if (!confirm("Отменить эту запись? Слот освободится.")) return;
-    try {
-      const r = await fetch("/api/cancel", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, phone }),
-      });
-      const data = await r.json();
-      if (!data.ok) throw new Error(data.error || "Не получилось отменить");
-      myFind();
-      loadSlots();
-    } catch (e) { $("#myErr").textContent = e.message; }
-  }
-
   // ---------- init ----------
   async function init() {
-    initTheme();
-    const burger = $("#burger"), nav = $("#nav");
-    if (burger) burger.onclick = () => nav.classList.toggle("open");
-    $$("#nav a").forEach((a) => a.onclick = () => nav.classList.remove("open"));
-    $("#year").textContent = new Date().getFullYear();
-
     try {
       const r = await fetch("/api/config");
       const cfg = await r.json();
       if (cfg.subjects && cfg.subjects.length) state.subjects = cfg.subjects;
-      if (cfg.tutorName) {
-        state.tutorName = cfg.tutorName;
-        $("#logoName").textContent = cfg.tutorName;
-        $("#footName").textContent = cfg.tutorName;
-        document.title = `${cfg.tutorName} — запись онлайн`;
-      }
       if (cfg.tzLabel) { state.tzLabel = cfg.tzLabel; $("#tzLabel").textContent = cfg.tzLabel; }
-      if (cfg.tutorTg) { state.tutorTg = cfg.tutorTg; $("#contactTg").href = `https://t.me/${cfg.tutorTg}`; }
     } catch (e) {}
 
-    const qs = new URLSearchParams(location.search);
+    try {
+      const u = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
+      if (u) {
+        if (u.id) state.chatId = String(u.id);
+        if (u.first_name && !$("#fName").value) {
+          $("#fName").value = u.first_name + (u.last_name ? " " + u.last_name : "");
+        }
+      }
+    } catch (e) {}
+
     renderSubjects();
     buildDates();
-    const pre = qs.get("subject");
-    if (pre && state.subjects.includes(pre)) selectSubject(pre);
-    else { state.subject = state.subjects[0] || ""; if (state.subject) selectSubject(state.subject); }
+    if (state.subjects.length) selectSubject(state.subjects[0]);
 
     $("#bookBtn").onclick = submit;
+    if (tg && tg.MainButton) { try { tg.MainButton.onClick(submit); } catch (e) {} }
     $("#againBtn").onclick = (e) => {
       e.preventDefault();
       $("#bookSuccess").classList.add("hidden");
       $("#formStep").classList.remove("hidden");
       state.time = ""; loadSlots();
     };
-    $("#myFind").onclick = myFind;
-    $("#myPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") myFind(); });
 
     loadSlots();
   }

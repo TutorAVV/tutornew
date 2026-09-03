@@ -43,19 +43,15 @@ h2{font-size:clamp(24px,3.4vw,34px);margin:0 0 8px;letter-spacing:-.01em}
 
 /* hero */
 .hero{background:radial-gradient(900px 420px at 85% -60px,#e0e7ff 0%,transparent 60%),radial-gradient(700px 380px at -80px 120px,#ede9fe 0%,transparent 55%),var(--bg);padding:56px 0 60px}
-.hero-in{display:grid;grid-template-columns:1.15fr .85fr;gap:36px;align-items:center}
+.hero-in{max-width:800px;margin:0 auto}
 .badge{display:inline-block;background:#eef2ff;border:1px solid #dfe3ff;color:var(--brand-d);font-weight:700;font-size:13px;border-radius:999px;padding:7px 14px}
 .lead{font-size:18px;color:#3c4463}
+body.dark .lead{color:var(--muted)}
 .hero-btns{display:flex;gap:12px;flex-wrap:wrap;margin:22px 0}
 .hero-btns.center{justify-content:center}
 .stats{display:flex;gap:28px;margin-top:8px}
 .stat b{display:block;font-size:26px}
 .stat span{color:var(--muted);font-size:14px}
-.mini-card{background:var(--card);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);padding:24px}
-.mini-head{font-weight:800;margin-bottom:12px}
-.hero-slots{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;min-height:44px}
-.hero-chip{background:#eef0ff;border:1px solid #dfe3ff;color:var(--brand-d);font-weight:700;border-radius:999px;padding:8px 14px;font-size:14px;text-decoration:none}
-.mini-note{text-align:center;color:var(--muted);font-size:13px;margin-top:10px}
 
 /* sections */
 .section{padding:64px 0}
@@ -88,7 +84,17 @@ h2{font-size:clamp(24px,3.4vw,34px);margin:0 0 8px;letter-spacing:-.01em}
 .seg{display:flex;background:#eef0ff;border-radius:14px;padding:4px;gap:4px;max-width:420px}
 .seg-btn{flex:1;border:0;background:transparent;border-radius:10px;padding:11px;font-weight:700;font-size:15px;cursor:pointer;color:var(--muted)}
 .seg-btn.active{background:#fff;color:var(--ink);box-shadow:0 2px 8px rgba(20,26,51,.12)}
-.dates{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin}
+.dates{
+  display:flex;
+  gap:10px;
+  overflow-x:auto;
+  padding-bottom:8px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.dates::-webkit-scrollbar {
+  display: none;
+}
 .date-btn{flex:none;width:86px;border:1.5px solid var(--line);background:#fff;border-radius:16px;padding:10px 6px;cursor:pointer;text-align:center;transition:all .12s}
 .date-btn .dw{display:block;font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase}
 .date-btn .dn{display:block;font-size:22px;font-weight:800}
@@ -170,7 +176,7 @@ pre.code{background:#0f1530;color:#dbe4ff;border-radius:12px;padding:14px;overfl
 .theme-btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;color:var(--muted)}
 .theme-btn:hover{color:var(--brand);border-color:var(--brand)}
 
-/* dark theme (как на старом сайте) */
+/* dark theme */
 body.dark{--bg:#0f1428;--tint:#151b36;--ink:#eef0ff;--muted:#9aa3c7;--card:#1a2140;--line:#2a3363}
 body.dark .header{background:rgba(15,20,40,.9)}
 body.dark .logo{color:var(--ink)}
@@ -178,11 +184,36 @@ body.dark .form input,body.dark .form select,body.dark .my-row input{background:
 body.dark .chip,body.dark .date-btn,body.dark .slot,body.dark .burger,body.dark .theme-btn{background:#1a2140;color:var(--ink)}
 body.dark .seg{background:#10173a}
 body.dark .seg-btn.active{background:#2a3363;color:#fff}
-body.dark .slot:disabled{background:#141a33}
+body.dark .slot:disabled{background:#141a33;color:var(--muted)}
 body.dark .faq summary{color:var(--ink)}
 body.dark .tbl th{color:var(--muted)}
 body.dark .mini-btn,body.dark .tab,body.dark .toolbar input,body.dark .toolbar select{background:#1a2140;color:var(--ink);border-color:var(--line)}
 body.dark .tab.active{background:#eef0ff;color:#0f1428}
+
+body.dark .book-main,
+body.dark .side-card,
+body.dark .panel-lite,
+body.dark .panel,
+body.dark .faq,
+body.dark .login-card {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--line);
+}
+body.dark .summary {
+  background: #141b3a;
+  border-color: #2a3363;
+  color: var(--ink);
+}
+body.dark .summary.ready {
+  background: #102a22;
+  border-color: #1b4d3e;
+  color: #4ade80;
+}
+body.dark .side-list,
+body.dark .faq p {
+  color: var(--muted);
+}
 
 /* responsive */
 @media(max-width:900px){
@@ -199,3 +230,4 @@ body.dark .tab.active{background:#eef0ff;color:#0f1428}
   .slots{grid-template-columns:repeat(2,1fr)}
   .my-row{flex-direction:column}
 }
+body.dark .nav{background:#1a2140}

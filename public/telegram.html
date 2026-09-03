@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Запись на онлайн-уроки (Telegram)</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main style="padding: 16px 0;">
+<section class="section" id="booking" style="padding: 0;">
+  <div class="wrap">
+    <h2>Запись на занятие</h2>
+    <p class="sub">Выберите предмет, дату и время. Напоминание придёт сюда, в Telegram.</p>
+
+    <div class="book" style="grid-template-columns: 1fr;">
+      <div class="book-main">
+        <div class="step">
+          <div class="step-title"><span class="step-n">1</span> Предмет</div>
+          <div class="chips chips-wrap" id="bookSubjects"></div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">2</span> Дата</div>
+          <div class="dates" id="dateStrip"></div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">3</span> Время слота (<span id="tzLabel">МСК+2</span>) <span class="muted-sm" id="slotsHint"></span></div>
+          <div class="slots" id="slotsGrid"></div>
+        </div>
+
+        <div class="step" id="formStep">
+          <div class="step-title"><span class="step-n">4</span> Ваши данные</div>
+          <div class="form">
+            <div class="row2">
+              <label>Фамилия Имя*
+                <input id="fName" type="text" placeholder="Иванов Иван" autocomplete="name" maxlength="80">
+              </label>
+              <label>Email
+                <input id="fEmail" type="email" placeholder="name@example.com" autocomplete="email" maxlength="120">
+              </label>
+            </div>
+            <div class="row2">
+              <label>Телефон*
+                <input id="fPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" inputmode="tel">
+              </label>
+              <label>Класс
+                <select id="fGrade">
+                  <option value="">—</option>
+                  <option>4 класс</option><option>5 класс</option><option>6 класс</option>
+                  <option>7 класс</option><option>8 класс</option><option>9 класс (ОГЭ)</option>
+                </select>
+              </label>
+            </div>
+            <label style="margin-top:12px">Комментарий
+              <input id="fComment" type="text" placeholder="Темы, цель, пожелания…" maxlength="200">
+            </label>
+            <div class="summary" id="bookSummary">Выберите дату и время ↑</div>
+            <button class="btn btn-primary btn-lg btn-block" id="bookBtn">Записаться на занятие</button>
+            <div class="form-err" id="formErr"></div>
+          </div>
+        </div>
+
+        <div class="success hidden" id="bookSuccess">
+          <div class="success-emoji">🎉</div>
+          <h3>Вы записаны!</h3>
+          <p id="successText"></p>
+          <p class="muted" id="remindNote">⏰ За час до занятия пришлём напоминание сюда, в Telegram.</p>
+          <div class="success-btns center" style="margin-top: 16px;">
+            <a class="btn btn-ghost" href="#booking" id="againBtn">Записать ещё</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script src="/app-tg.js"></script>
+</body>
+</html>
