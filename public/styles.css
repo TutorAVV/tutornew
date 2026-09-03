@@ -7,7 +7,7 @@
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55;-webkit-tap-highlight-color:transparent;overflow-x:hidden}
 .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
 .narrow{max-width:720px}
 .center{text-align:center}
@@ -43,10 +43,12 @@ h2{font-size:clamp(24px,3.4vw,34px);margin:0 0 8px;letter-spacing:-.01em}
 
 /* hero */
 .hero{background:radial-gradient(900px 420px at 85% -60px,#e0e7ff 0%,transparent 60%),radial-gradient(700px 380px at -80px 120px,#ede9fe 0%,transparent 55%),var(--bg);padding:56px 0 60px}
+body.dark .hero{background:radial-gradient(900px 420px at 85% -60px,rgba(79,70,229,.18) 0%,transparent 60%),radial-gradient(700px 380px at -80px 120px,rgba(124,58,237,.14) 0%,transparent 55%),var(--bg)}
 .hero-in{max-width:800px;margin:0 auto}
 .badge{display:inline-block;background:#eef2ff;border:1px solid #dfe3ff;color:var(--brand-d);font-weight:700;font-size:13px;border-radius:999px;padding:7px 14px}
 .lead{font-size:18px;color:#3c4463}
 body.dark .lead{color:var(--muted)}
+body.dark .badge{background:#1e2548;border-color:#2a3363;color:#a5b4fc}
 .hero-btns{display:flex;gap:12px;flex-wrap:wrap;margin:22px 0}
 .hero-btns.center{justify-content:center}
 .stats{display:flex;gap:28px;margin-top:8px}
@@ -77,8 +79,8 @@ body.dark .lead{color:var(--muted)}
 
 /* booking */
 .book{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:start}
-.book-main{background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);padding:28px}
-.step{margin-bottom:26px}
+.book-main{background:#fff;border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);padding:28px;overflow:hidden;max-width:100%}
+.step{margin-bottom:26px;overflow:hidden}
 .step-title{font-weight:800;font-size:17px;margin-bottom:12px;display:flex;align-items:center;gap:10px}
 .step-n{display:inline-flex;width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;font-size:14px;align-items:center;justify-content:center;flex:none}
 .seg{display:flex;background:#eef0ff;border-radius:14px;padding:4px;gap:4px;max-width:420px}
@@ -89,8 +91,10 @@ body.dark .lead{color:var(--muted)}
   gap:10px;
   overflow-x:auto;
   padding-bottom:8px;
+  max-width:100%;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
 }
 .dates::-webkit-scrollbar {
   display: none;
@@ -231,3 +235,87 @@ body.dark .faq p {
   .my-row{flex-direction:column}
 }
 body.dark .nav{background:#1a2140}
+
+/* ========== Telegram / Mobile Adaptation ========== */
+
+/* Telegram WebApp: подгоняем под тему Telegram */
+body.tg{
+  --bg: var(--tg-theme-bg-color, var(--bg));
+  --ink: var(--tg-theme-text-color, var(--ink));
+  --muted: var(--tg-theme-hint-color, var(--muted));
+  --card: var(--tg-theme-secondary-bg-color, var(--card));
+  --line: var(--tg-theme-secondary-bg-color, var(--line));
+  font-size:15px;
+}
+
+/* Сжимаем даты на мобильных чтобы не вылезали */
+@media(max-width:600px){
+  .wrap{padding:0 12px}
+  h1{font-size:clamp(22px,6vw,32px)}
+  h2{font-size:clamp(20px,5vw,26px)}
+  .hero{padding:32px 0 36px}
+  .hero-btns{flex-direction:column;align-items:stretch}
+  .hero-btns .btn{text-align:center;width:100%}
+  .lead{font-size:15px}
+  .stats{flex-wrap:wrap;gap:16px}
+  .stat b{font-size:22px}
+
+  .date-btn{width:64px;padding:8px 4px;border-radius:12px}
+  .date-btn .dw{font-size:10px}
+  .date-btn .dn{font-size:18px}
+  .date-btn .dm{font-size:10px}
+  .dates{
+    gap:6px;
+    padding-bottom:6px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+  .date-btn{scroll-snap-align: start}
+
+  .slots{grid-template-columns:repeat(2,1fr);gap:8px}
+  .slot{padding:10px 6px}
+  .slot b{font-size:16px}
+  .slot small{font-size:11px}
+
+  .book-main{padding:14px;border-radius:16px}
+  .step{margin-bottom:18px}
+  .step-title{font-size:15px}
+  .chip{padding:8px 14px;font-size:13px}
+
+  .form input,.form select{padding:11px 12px;font-size:15px}
+  .summary{font-size:13px;padding:10px 12px}
+  .btn-lg{padding:13px 20px;font-size:15px}
+
+  .section{padding:28px 0}
+
+  .cards3{gap:12px}
+  .card{padding:18px}
+  .card-emoji{font-size:28px}
+  .price-v{font-size:24px}
+
+  .footer-in{flex-direction:column;align-items:flex-start;gap:8px}
+}
+
+/* Extra small (iPhone SE, width < 380px) */
+@media(max-width:380px){
+  .wrap{padding:0 8px}
+  .date-btn{width:56px;padding:7px 3px}
+  .date-btn .dn{font-size:16px}
+  .slots{grid-template-columns:1fr 1fr}
+  .book-main{padding:10px}
+}
+
+/* Scrollbar для дат на десктопе — плавная прокрутка */
+@media(min-width:601px){
+  .dates{
+    max-width:100%;
+    overflow-x:auto;
+    scrollbar-width:thin;
+  }
+}
+
+/* Telegram специфичные мелочи */
+body.tg .header{display:none}
+body.tg .footer{display:none}
+body.tg main{padding:8px 0!important}
+body.tg .book-main{box-shadow:none;border-color:var(--line)}
