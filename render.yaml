@@ -1,0 +1,35 @@
+# Render.com — бесплатный деплой (Static + Web в одном сервисе)
+# Документация по запуску: см. README.md
+services:
+  - type: web
+    name: tutor-booking
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: API_SECRET
+        generateValue: true
+      - key: APPS_SCRIPT_URL
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: SHEET_URL
+        sync: false
+      - key: TUTOR_NAME
+        value: Репетитор
+      - key: TUTOR_PHONE
+        sync: false
+      - key: TUTOR_SUBJECTS
+        value: Математика,Физика
+      - key: TZ_LABEL
+        value: МСК+2
+      - key: TUTOR_TG
+        value: aviation09
+      - key: LESSON_DURATION
+        value: "50"

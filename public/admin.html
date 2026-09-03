@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Админ-панель — записи</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠</text></svg>">
+</head>
+<body>
+<div class="admin-wrap">
+  <div id="loginView">
+    <div class="login-card">
+      <div style="font-size:44px">🔐</div>
+      <h2>Админ-панель</h2>
+      <p class="muted">Пароль — из Render → Environment → <span class="kbd">ADMIN_KEY</span></p>
+      <div class="form" style="text-align:left">
+        <label>Пароль<input id="adminPass" type="password" placeholder="••••••••" autocomplete="current-password"></label>
+        <button class="btn btn-primary btn-block" id="loginBtn">Войти</button>
+        <div class="form-err" id="loginErr"></div>
+      </div>
+      <p><a href="/" class="muted">← На сайт</a></p>
+    </div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <div class="admin-top">
+      <h1>🛠 Записи <span class="muted-sm" id="storageBadge"></span></h1>
+      <div class="spacer"></div>
+      <a class="mini-btn" id="sheetLink" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none">📊 Google Таблица</a>
+      <a class="mini-btn" href="/" style="text-decoration:none">← На сайт</a>
+      <button class="mini-btn" id="logoutBtn">Выйти</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="schedule">🗓 Расписание</button>
+      <button class="tab" data-tab="bookings">📋 Заявки</button>
+      <button class="tab" data-tab="slots">➕ Слоты</button>
+      <button class="tab" data-tab="help">❓ Настройка</button>
+    </div>
+
+    <!-- SCHEDULE: все слоты 60 дней, включая занятые -->
+    <div class="panel" id="tab-schedule">
+      <div class="toolbar">
+        <input id="schFrom" type="date"> — <input id="schTo" type="date">
+        <select id="schStatus">
+          <option value="">все</option><option value="open">свободные</option>
+          <option value="booked">занятые</option><option value="closed">закрытые</option>
+        </select>
+        <button class="mini-btn" id="schLoad">Показать</button>
+        <button class="mini-btn" id="schCsv">⬇ CSV</button>
+      </div>
+      <div class="toolbar">
+        <button class="mini-btn" id="cleanupBtn">🧹 Удалить прошедшие (кроме занятых)</button>
+        <span class="muted-sm">Очистить диапазон:</span>
+        <input id="clrFrom" type="date"> — <input id="clrTo" type="date">
+        <button class="mini-btn" id="clrClose">Закрыть</button>
+        <button class="mini-btn danger" id="clrDelete">Удалить</button>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="tbl" id="schTable">
+        <thead><tr><th>Дата</th><th>Время</th><th>Длит.</th><th>Статус</th><th>Ученик</th><th>Действие</th></tr></thead>
+        <tbody><tr><td colspan="6" class="muted">Загрузка…</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- BOOKINGS -->
+    <div class="panel hidden" id="tab-bookings">
+      <div class="toolbar">
+        <select id="fStatus">
+          <option value="">Все статусы</option>
+          <option value="new">Новые</option>
+          <option value="confirmed">Подтверждённые</option>
+          <option value="done">Завершённые</option>
+          <option value="cancelled">Отменённые</option>
+        </select>
+        <input id="fSearch" type="text" placeholder="Поиск: имя, телефон, предмет…">
+        <button class="mini-btn" id="reloadBookings">🔄 Обновить</button>
+        <button class="mini-btn" id="exportCsv">⬇ CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="tbl" id="bookTable">
+        <thead><tr><th>Дата/время</th><th>Ученик</th><th>Предмет</th><th>Статус</th><th>Действия</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted">Загрузка…</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- SLOTS: добавление + генерация -->
+    <div class="panel hidden" id="tab-slots">
+      <h3>Добавить слот</h3>
+      <div class="toolbar">
+        <input id="slotDate" type="date">
+        <input id="newTime" type="time" value="17:00">
+        <input id="newDur" type="number" value="50" min="15" max="240" step="5" style="width:90px" title="Длительность, мин">
+        <span class="muted-sm">мин</span>
+        <button class="mini-btn" id="addSlot">＋ Добавить</button>
+      </div>
+      <h3>Массово на диапазон</h3>
+      <div class="toolbar">
+        <input id="genFrom" type="date"> — <input id="genTo" type="date">
+      </div>
+      <div class="toolbar">
+        <span class="muted-sm">Будни Пн–Пт:</span>
+        <input id="wdFrom" type="time" value="16:00"> — <input id="wdTo" type="time" value="20:00">
+      </div>
+      <div class="toolbar">
+        <span class="muted-sm">Выходные Сб–Вс:</span>
+        <input id="weFrom" type="time" value="10:00"> — <input id="weTo" type="time" value="13:00">
+      </div>
+      <div class="toolbar">
+        <span class="muted-sm">Длительность:</span>
+        <input id="genDur" type="number" value="50" min="15" max="240" step="5" style="width:80px">
+        <span class="muted-sm">мин · Шаг:</span>
+        <input id="genStep" type="number" value="60" min="15" max="240" step="5" style="width:80px">
+        <span class="muted-sm">мин</span>
+        <label class="muted-sm"><input type="checkbox" id="genKeep" checked> не изменять существующие</label>
+        <button class="mini-btn" id="genBtn">⚡ Сгенерировать</button>
+      </div>
+      <div class="muted-sm">Или точное время через запятую (вместо окон): <input id="genTimes" type="text" placeholder="16:00,17:00,18:00" style="min-width:200px"></div>
+    </div>
+
+    <!-- HELP -->
+    <div class="panel hidden" id="tab-help">
+      <h3>Где лежат данные</h3>
+      <p id="storageText" class="muted"></p>
+      <h3>⚠️ Слоты есть в таблице, но их нет на сайте?</h3>
+      <ol class="side-list">
+        <li>Убедитесь, что в Apps Script вставлен <b>актуальный</b> <span class="kbd">Code.gs</span> из репозитория (v2 понимает старый формат таблицы).</li>
+        <li>После изменения кода: <b>Развернуть → Управление развертываниями → ✏️ → Новая версия</b>. Без этого сайт видит старый код!</li>
+        <li>Проверьте <span class="kbd">SHEET_ID</span> и <span class="kbd">API_SECRET</span> (= как в Render).</li>
+      </ol>
+      <h3>Напоминания за час в Telegram</h3>
+      <ol class="side-list">
+        <li>В <span class="kbd">Code.gs</span> заполните <span class="kbd">BOT_TOKEN</span> и <span class="kbd">ADMIN_CHAT_ID</span>.</li>
+        <li>В редакторе Apps Script выберите функцию <span class="kbd">createReminderTrigger</span> → ▶️ → разрешите доступ. Триггер проверяет занятия каждые 15 минут.</li>
+        <li>Напоминание приходит ученикам, которые записывались <b>через Telegram-бота</b> (тогда сохраняется chat id). Плюс копия — вам.</li>
+      </ol>
+      <h3>Telegram-бот</h3>
+      <p class="muted">BotFather → /newbot → токен в <span class="kbd">BOT_TOKEN</span> → /setmenubutton → адрес сайта. Подробно — в <span class="kbd">README.md</span>.</p>
+    </div>
+  </div>
+</div>
+<script src="/admin.js"></script>
+</body>
+</html>

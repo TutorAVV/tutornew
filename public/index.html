@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Онлайн-уроки по математике и физике — запись онлайн</title>
+<meta name="description" content="Индивидуальные онлайн-занятия по математике и физике для 4–9 классов, урок 50 минут. Выберите время и запишитесь за минуту.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📐</text></svg>">
+</head>
+<body>
+<header class="header" id="top">
+  <div class="wrap header-in">
+    <a class="logo" href="#top">📐 <span id="logoName">Онлайн-уроки</span></a>
+    <nav class="nav" id="nav">
+      <a href="#booking">Запись</a>
+      <a href="#my">Мои записи</a>
+      <a href="#contacts">Контакты</a>
+    </nav>
+    <div class="header-cta">
+      <button class="theme-btn" id="themeBtn" aria-label="Переключить тему">🌙 Тёмная тема</button>
+      <a class="btn btn-primary btn-sm" href="#booking">Записаться</a>
+      <button class="burger" id="burger" aria-label="Меню">☰</button>
+    </div>
+  </div>
+</header>
+
+<main>
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap hero-in">
+    <div class="hero-text center">
+      <h1>Онлайн-уроки по математике и физике</h1>
+      <p class="lead" style="max-width: 640px; margin: 0 auto 24px;"><b>Математика и физика — без пробелов.</b><br>
+      Помогаю подтянуть оценки, разобраться в сложных темах и полюбить предметы.<br>
+      Индивидуальные занятия для 4–9 классов, урок — 50 минут.</p>
+      <div class="hero-btns center">
+        <a class="btn btn-primary btn-lg" href="#booking">📅 Записаться на занятие</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BOOKING -->
+<section class="section section-tint" id="booking">
+  <div class="wrap">
+    <h2>Запись на занятие</h2>
+    <p class="sub">Выберите предмет, дату и время кнопками. Это займёт около минуты — никому звонить не нужно.</p>
+
+    <div class="book">
+      <div class="book-main">
+        <div class="step">
+          <div class="step-title"><span class="step-n">1</span> Предмет</div>
+          <div class="chips chips-wrap" id="bookSubjects"></div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">2</span> Дата</div>
+          <div class="dates" id="dateStrip"></div>
+        </div>
+
+        <div class="step">
+          <div class="step-title"><span class="step-n">3</span> Время слота (<span id="tzLabel">МСК+2</span>) <span class="muted-sm" id="slotsHint"></span></div>
+          <div class="slots" id="slotsGrid"></div>
+        </div>
+
+        <div class="step" id="formStep">
+          <div class="step-title"><span class="step-n">4</span> Ваши данные</div>
+          <div class="form">
+            <div class="row2">
+              <label>Фамилия Имя*
+                <input id="fName" type="text" placeholder="Иванов Иван" autocomplete="name" maxlength="80">
+              </label>
+              <label>Email
+                <input id="fEmail" type="email" placeholder="name@example.com" autocomplete="email" maxlength="120">
+              </label>
+            </div>
+            <div class="row2">
+              <label>Телефон*
+                <input id="fPhone" type="tel" placeholder="+7 999 123-45-67" autocomplete="tel" inputmode="tel">
+              </label>
+              <label>Класс
+                <select id="fGrade">
+                  <option value="">—</option>
+                  <option>4 класс</option><option>5 класс</option><option>6 класс</option>
+                  <option>7 класс</option><option>8 класс</option><option>9 класс (ОГЭ)</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-note">Телефон и e-mail — для связи и подтверждения.</div>
+            <label style="margin-top:12px">Комментарий
+              <input id="fComment" type="text" placeholder="Темы, цель, пожелания…" maxlength="200">
+            </label>
+            <div class="summary" id="bookSummary">Выберите дату и время ↑</div>
+            <button class="btn btn-primary btn-lg btn-block" id="bookBtn">Записаться на занятие</button>
+            <div class="form-note">Нажимая кнопку, вы соглашаетесь на обработку персональных данных.</div>
+            <div class="form-err" id="formErr"></div>
+          </div>
+        </div>
+
+        <div class="success hidden" id="bookSuccess">
+          <div class="success-emoji">🎉</div>
+          <h3>Вы записаны!</h3>
+          <p id="successText"></p>
+          <p class="muted" id="remindNote"></p>
+          <div class="success-btns">
+            <a class="btn btn-ghost" href="#booking" id="againBtn">Записать ещё</a>
+            <a class="btn btn-primary" href="#top">На главную</a>
+          </div>
+        </div>
+      </div>
+
+      <aside class="book-side">
+        <div class="side-card">
+          <h4>💡 Как это работает</h4>
+          <ol class="side-list">
+            <li>Выбираете время кнопками выше</li>
+            <li>Оставляете имя и телефон</li>
+            <li>Приходит подтверждение</li>
+            <li>Перед занятием — ссылка и напоминание</li>
+          </ol>
+        </div>
+        <div class="side-card">
+          <h4>🔁 Нужно перенести?</h4>
+          <p class="muted">Откройте «Мои записи» ниже, отмените старую запись и выберите новое время. Звонить не нужно.</p>
+          <a class="btn btn-ghost btn-block" href="#my">Мои записи</a>
+        </div>
+        <div class="side-card">
+          <h4>📱 Удобно в Telegram</h4>
+          <p class="muted">Вы можете открыть эту запись через наш Telegram-бот — там удобно получать напоминания.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- MY BOOKINGS -->
+<section class="section" id="my">
+  <div class="wrap narrow">
+    <h2>🔁 Мои записи</h2>
+    <p class="sub">Введите номер телефона из заявки — покажем будущие занятия. Отсюда можно отменить запись и выбрать новое время (перезаписаться).</p>
+    <div class="panel-lite">
+      <div class="my-row">
+        <input id="myPhone" type="tel" placeholder="+7 999 123-45-67" inputmode="tel">
+        <button class="btn btn-primary" id="myFind">Найти</button>
+      </div>
+      <div class="form-err" id="myErr"></div>
+      <div id="myList"></div>
+    </div>
+  </div>
+</section>
+
+<!-- CONTACTS -->
+<section class="section section-tint" id="contacts">
+  <div class="wrap narrow center">
+    <h2>Контакты</h2>
+    <p class="sub">Вопросы — в Telegram, отвечаю в течение дня</p>
+    <div class="hero-btns center">
+      <a class="btn btn-primary btn-lg" id="contactTg" href="https://t.me/aviation09" target="_blank" rel="noopener">💬 Связаться в Telegram</a>
+      <a class="btn btn-ghost btn-lg" href="#booking">📅 Записаться</a>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-in">
+    <div>© <span id="year">2026</span> <span id="footName">Онлайн-уроки</span>. Все права защищены.</div>
+    <div class="footer-links"><a href="#booking">Запись</a><a href="/admin.html">Вход для админа</a></div>
+  </div>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
