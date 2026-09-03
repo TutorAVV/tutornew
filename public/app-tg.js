@@ -5,7 +5,25 @@
   const $$ = (s) => Array.from(document.querySelectorAll(s));
 
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
-  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+  if (tg) {
+    try {
+      tg.ready();
+      tg.expand();
+      tg.enableClosingConfirmation && tg.enableClosingConfirmation();
+      // Apply Telegram theme
+      document.body.classList.add("tg");
+      if (tg.colorScheme === "dark") {
+        document.body.classList.add("dark");
+      }
+      tg.onEvent && tg.onEvent("themeChanged", function () {
+        if (tg.colorScheme === "dark") {
+          document.body.classList.add("dark");
+        } else {
+          document.body.classList.remove("dark");
+        }
+      });
+    } catch (e) {}
+  }
 
   const state = {
     subjects: ["Математика", "Физика"],
