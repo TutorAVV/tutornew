@@ -1,5 +1,5 @@
 /**
- * Tutor booking v2 — backend на Google Apps Script + Google Таблица.
+ * Tutor booking v3 — backend на Google Apps Script + Google Таблица.
  *
  * СОВМЕСТИМОСТЬ: понимает СТАРУЮ таблицу (date ДД.ММ.ГГГГ, статусы open/booked/closed,
  * колонки date|time|duration|status|student|email|phone) и новую. Колонки ищутся
@@ -13,8 +13,12 @@
  * 3. Развернуть → НОВОЕ развертывание → Веб-приложение (Я / Все) → URL в Render
  *    → APPS_SCRIPT_URL. ⚠️ После КАЖДОГО изменения кода: Управление
  *    развертываниями → ✏️ → Новая версия (иначе сайт видит старый код!).
- * 4. Для напоминаний за час: один раз запустить функцию createReminderTrigger()
+ * 4. Для напоминаний: один раз запустить функцию createReminderTrigger()
  *    (▶️ в редакторе) и разрешить доступ.
+ *
+ * v3: перенос занятий учеником, универсальные таблицы (Settings, Users,
+ * Messages, Students, Notes) для сервера, исправлена ошибка
+ * «You can't set the number format of cells in a typed column».
  */
 
 var SHEET_ID = "ВСТАВЬТЕ_ID_ТАБЛИЦЫ";
@@ -296,6 +300,91 @@ function cancelBooking_(p) {
   return { ok: false, error: "Запись не найдена" };
 }
 
+/**
+ * Перенос записи учеником: старый слот освобождается, новый занимается,
+ * строка в Bookings остаётся та же (меняются date/time). Проверка «не позже
+ * чем за N часов» делается на сервере (настройка rescheduleHours), здесь —
+ * только целостность данных.
+ */
+function rescheduleBooking_(p) {
+  var newDate = normDate_(p.date), newTime = normTime_(p.time);
+  if (!newDate || !newTime) return { ok: false, error: "Выберите новое время" };
+  var bh = sheetByName_(BOOKINGS_SHEET_NAME, NEW_BOOK_HEADERS);
+  var bm = colMap_(bh).map;
+  var vals = rows_(bh);
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (String(r[bm.id] || "") !== String(p.id) || !samePhone_(r[bm.phone], p.phone)) continue;
+    var st = ("status" in bm) ? String(r[bm.status] || "new") : "new";
+    if (st === "cancelled" || st === "done") return { ok: false, error: "Эта запись уже неактивна" };
+    var oldDate = normDate_(r[bm.date]), oldTime = normTime_(r[bm.time]);
+    if (oldDate === newDate && oldTime === newTime) return { ok: false, error: "Это то же самое время" };
+
+    var sh = sheetByName_(SLOTS_SHEET_NAME, NEW_SLOT_HEADERS);
+    var cm0 = colMap_(sh);
+    ["status", "student", "email", "phone", "subject", "chat_id", "reminded"].forEach(function (k) { ensureCol_(sh, cm0, k); });
+    var cm = cm0.map;
+    var target = findSlotRow_(sh, cm, newDate, newTime);
+    if (!target) return { ok: false, error: "Этот слот уже недоступен, выберите другое время" };
+    var tst = normStatus_(target.vals[cm.status]);
+    if (tst === "booked") return { ok: false, error: "Это время уже занято, выберите другое" };
+    if (tst === "closed") return { ok: false, error: "Запись на это время закрыта, выберите другое" };
+
+    // данные ученика — из старого слота (если есть) или из заявки
+    var old = findSlotRow_(sh, cm, oldDate, oldTime);
+    var name = String(r[("student" in bm) ? bm.student : bm.name] || "");
+    var email = ("email" in bm) ? String(r[bm.email] || "") : "";
+    var phone = String(r[bm.phone] || "");
+    var subject = ("subject" in bm) ? String(r[bm.subject] || "") : "";
+    var chatId = ("chat_id" in bm) ? String(r[bm.chat_id] || "") : "";
+    if (old) {
+      if (!email && old.vals[cm.email]) email = String(old.vals[cm.email]);
+      if (!chatId && old.vals[cm.chat_id]) chatId = String(old.vals[cm.chat_id]);
+      if (!subject && old.vals[cm.subject]) subject = String(old.vals[cm.subject]);
+    }
+    // занять новый
+    sh.getRange(target.row, cm.status + 1).setValue("booked");
+    sh.getRange(target.row, cm.student + 1).setValue(name);
+    sh.getRange(target.row, cm.email + 1).setValue(email);
+    sh.getRange(target.row, cm.phone + 1).setValue(phone);
+    if (subject) sh.getRange(target.row, cm.subject + 1).setValue(subject);
+    sh.getRange(target.row, cm.chat_id + 1).setValue(chatId);
+    sh.getRange(target.row, cm.reminded + 1).setValue("");
+    // освободить старый
+    freeSlotRow_(oldDate, oldTime);
+    // обновить заявку
+    writeText_(bh, i + 2, bm.date, newDate);
+    writeText_(bh, i + 2, bm.time, newTime);
+    if ("status" in bm && st !== "confirmed") bh.getRange(i + 2, bm.status + 1).setValue("new");
+
+    notify_("🔁 Ученик перенёс занятие\n👤 " + name + " 📞 " + phone +
+      "\n📅 Было: " + oldDate + " в " + oldTime + "\n📅 Стало: " + newDate + " в " + newTime);
+    return { ok: true, id: String(p.id), date: newDate, time: newTime, chatId: chatId };
+  }
+  return { ok: false, error: "Запись не найдена" };
+}
+
+/** Привязать chat_id к ученику по телефону (после «Поделиться номером» в боте) — для напоминаний */
+function linkChat_(p) {
+  var n = 0;
+  if (!p.phone || !p.chatId) return { ok: false, error: "bad payload" };
+  var sh = sheetByName_(SLOTS_SHEET_NAME, NEW_SLOT_HEADERS);
+  var cm0 = colMap_(sh); ensureCol_(sh, cm0, "chat_id"); var cm = cm0.map;
+  rows_(sh).forEach(function (r, i) {
+    if ("phone" in cm && samePhone_(r[cm.phone], p.phone) && !String(r[cm.chat_id] || "")) {
+      sh.getRange(i + 2, cm.chat_id + 1).setValue(String(p.chatId)); n++;
+    }
+  });
+  var bh = sheetByName_(BOOKINGS_SHEET_NAME, NEW_BOOK_HEADERS);
+  var bm0 = colMap_(bh); ensureCol_(bh, bm0, "chat_id"); var bm = bm0.map;
+  rows_(bh).forEach(function (r, i) {
+    if ("phone" in bm && samePhone_(r[bm.phone], p.phone) && !String(r[bm.chat_id] || "")) {
+      bh.getRange(i + 2, bm.chat_id + 1).setValue(String(p.chatId)); n++;
+    }
+  });
+  return { ok: true, linked: n };
+}
+
 function freeSlotRow_(dateDsp, timeStr) {
   var sh = sheetByName_(SLOTS_SHEET_NAME, NEW_SLOT_HEADERS);
   var cm = colMap_(sh).map;
@@ -337,6 +426,7 @@ function getBookings_(p) {
       comment: ("comment" in bm) ? String(r[bm.comment] || "") : "",
       contact: ("contact" in bm) ? String(r[bm.contact] || "") : "",
       source: ("source" in bm) ? String(r[bm.source] || "") : "",
+      chatId: ("chat_id" in bm) ? String(r[bm.chat_id] || "") : "",
       status: st
     });
   }
@@ -382,15 +472,47 @@ function getSchedule_(p) {
       student: String(g("student") || ""),
       email: String(g("email") || ""),
       phone: String(g("phone") || ""),
-      subject: String(g("subject") || "")
+      subject: String(g("subject") || ""),
+      chatId: String(g("chat_id") || "")
     });
   });
   out.sort(function (a, b) { return (a.iso + a.time) < (b.iso + b.time) ? -1 : 1; });
   return { ok: true, slots: out };
 }
 
+/**
+ * Записать текст. В «типизированных» колонках (Sheets → Формат → Тип колонки /
+ * таблицы) setNumberFormat бросает исключение — поэтому формат ставим
+ * «по возможности», а значение всё равно записываем (чтение через normDate_/
+ * normTime_ понимает и текст, и объекты Date).
+ */
 function writeText_(sh, row, colIdx, val) {
-  sh.getRange(row, colIdx + 1).setNumberFormat("@").setValue(val);
+  var rng = sh.getRange(row, colIdx + 1);
+  try { rng.setNumberFormat("@"); } catch (e) { /* typed column — пропускаем */ }
+  rng.setValue(val);
+}
+
+/** Добавить сразу несколько строк слотов (быстро, без setNumberFormat на каждую ячейку) */
+function appendSlotRows_(sh, cm, rows) {
+  if (!rows.length) return;
+  var width = Math.max(sh.getLastColumn(), 1);
+  var data = rows.map(function (r) {
+    var arr = [];
+    for (var c = 0; c < width; c++) arr.push("");
+    arr[cm.date] = r.date;
+    arr[cm.time] = r.time;
+    if ("duration" in cm) arr[cm.duration] = r.duration;
+    if ("status" in cm) arr[cm.status] = "open";
+    if ("subject" in cm && r.subject) arr[cm.subject] = r.subject;
+    return arr;
+  });
+  var start = sh.getLastRow() + 1;
+  var rng = sh.getRange(start, 1, data.length, width);
+  try {
+    sh.getRange(start, cm.date + 1, data.length, 1).setNumberFormat("@");
+    sh.getRange(start, cm.time + 1, data.length, 1).setNumberFormat("@");
+  } catch (e) { /* typed column */ }
+  rng.setValues(data);
 }
 
 function setSlot_(p) {
@@ -400,12 +522,7 @@ function setSlot_(p) {
   var cm0 = colMap_(sh);
   var cm = cm0.map;
   if (findSlotRow_(sh, cm, dateDsp, timeStr)) return { ok: false, error: "Слот уже существует" };
-  var row = sh.getLastRow() + 1;
-  writeText_(sh, row, cm.date, dateDsp);
-  writeText_(sh, row, cm.time, timeStr);
-  if ("duration" in cm) sh.getRange(row, cm.duration + 1).setValue(+(p.duration || DEFAULT_DURATION));
-  if ("status" in cm) sh.getRange(row, cm.status + 1).setValue("open");
-  if ("subject" in cm && p.subject) sh.getRange(row, cm.subject + 1).setValue(String(p.subject));
+  appendSlotRows_(sh, cm, [{ date: dateDsp, time: timeStr, duration: +(p.duration || DEFAULT_DURATION), subject: String(p.subject || "") }]);
   return { ok: true };
 }
 
@@ -472,7 +589,10 @@ function generateSlots_(p) {
   var explicit = timesFromWindows_(p);
   var dur = +(p.duration || DEFAULT_DURATION);
   var keep = p.keepExisting !== false && p.keepExisting !== "false";
-  var added = 0;
+  // существующие слоты — одним чтением
+  var existing = {};
+  rows_(sh).forEach(function (r) { existing[normDate_(r[cm.date]) + " " + normTime_(r[cm.time])] = true; });
+  var toAdd = [];
   var d = new Date(d0.y, d0.m - 1, d0.d), end = new Date(d1.y, d1.m - 1, d1.d);
   while (d <= end) {
     var dsp = pad2_(d.getDate()) + "." + pad2_(d.getMonth() + 1) + "." + d.getFullYear();
@@ -484,17 +604,14 @@ function generateSlots_(p) {
         : windowTimes_(p.wdFrom, p.wdTo, p.step);
     }
     (times || []).forEach(function (t) {
-      if (keep && findSlotRow_(sh, cm, dsp, t)) return;
-      var row = sh.getLastRow() + 1;
-      writeText_(sh, row, cm.date, dsp);
-      writeText_(sh, row, cm.time, t);
-      if ("duration" in cm) sh.getRange(row, cm.duration + 1).setValue(dur);
-      if ("status" in cm) sh.getRange(row, cm.status + 1).setValue("open");
-      added++;
+      if (keep && existing[dsp + " " + t]) return;
+      existing[dsp + " " + t] = true;
+      toAdd.push({ date: dsp, time: t, duration: dur, subject: "" });
     });
     d.setDate(d.getDate() + 1);
   }
-  return { ok: true, added: added };
+  appendSlotRows_(sh, cm, toAdd);
+  return { ok: true, added: toAdd.length };
 }
 
 /** Очистить диапазон: mode=delete (удалить) или close (закрыть) */
@@ -535,6 +652,107 @@ function cleanupPast_() {
   return { ok: true, deleted: del, keptBooked: kept };
 }
 
+// ---------- универсальные таблицы (Settings, Users, Messages, Students, Notes) ----------
+// Сервер хранит здесь настройки сайта, пользователей бота, переписку и данные учеников.
+// Первая строка — заголовки; недостающие колонки добавляются автоматически.
+function tblSheet_(name) {
+  name = String(name || "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 40);
+  if (!name) throw new Error("bad table");
+  var ss = ss_();
+  var sh = ss.getSheetByName(name);
+  if (!sh) { sh = ss.insertSheet(name); sh.setFrozenRows(1); }
+  return sh;
+}
+function tblHeaders_(sh) {
+  if (sh.getLastColumn() < 1) return [];
+  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h || "").trim(); });
+}
+function tblEnsure_(sh, headers, keys) {
+  var added = false;
+  keys.forEach(function (k) {
+    if (headers.indexOf(k) === -1) { headers.push(k); added = true; }
+  });
+  if (added) sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  return headers;
+}
+function tblCell_(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? "" : v.toISOString();
+  return v == null ? "" : v;
+}
+function tblList_(p) {
+  var sh = tblSheet_(p.table);
+  var head = tblHeaders_(sh);
+  var out = [];
+  if (sh.getLastRow() >= 2 && head.length) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, head.length).getValues().forEach(function (r) {
+      var o = {}, empty = true;
+      head.forEach(function (h, i) { if (!h) return; o[h] = tblCell_(r[i]); if (o[h] !== "") empty = false; });
+      if (!empty) out.push(o);
+    });
+  }
+  return { ok: true, rows: out };
+}
+function tblAppend_(p) {
+  var sh = tblSheet_(p.table);
+  var rows = Array.isArray(p.rows) ? p.rows : [p.row || {}];
+  var head = tblHeaders_(sh);
+  var keys = [];
+  rows.forEach(function (o) { Object.keys(o).forEach(function (k) { if (keys.indexOf(k) === -1) keys.push(k); }); });
+  head = tblEnsure_(sh, head, keys);
+  var data = rows.map(function (o) { return head.map(function (h) { return (h in o) ? tblCell_(o[h]) : ""; }); });
+  if (data.length) sh.getRange(sh.getLastRow() + 1, 1, data.length, head.length).setValues(data);
+  return { ok: true, added: data.length };
+}
+function tblUpdate_(p) {
+  var sh = tblSheet_(p.table);
+  var head = tblHeaders_(sh);
+  var patch = p.patch || {};
+  head = tblEnsure_(sh, head, Object.keys(patch));
+  var fi = head.indexOf(String(p.field));
+  if (fi === -1) return { ok: true, updated: 0 };
+  var n = 0;
+  if (sh.getLastRow() >= 2) {
+    var rng = sh.getRange(2, 1, sh.getLastRow() - 1, head.length);
+    var vals = rng.getValues();
+    var changed = false;
+    vals.forEach(function (r) {
+      if (String(tblCell_(r[fi])) !== String(p.value)) return;
+      Object.keys(patch).forEach(function (k) { r[head.indexOf(k)] = tblCell_(patch[k]); });
+      n++; changed = true;
+    });
+    if (changed) rng.setValues(vals);
+  }
+  return { ok: true, updated: n };
+}
+function tblRemove_(p) {
+  var sh = tblSheet_(p.table);
+  var head = tblHeaders_(sh);
+  var fi = head.indexOf(String(p.field));
+  if (fi === -1 || sh.getLastRow() < 2) return { ok: true, removed: 0 };
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, head.length).getValues();
+  var n = 0;
+  for (var i = vals.length - 1; i >= 0; i--) {
+    if (String(tblCell_(vals[i][fi])) === String(p.value)) { sh.deleteRow(i + 2); n++; }
+  }
+  return { ok: true, removed: n };
+}
+/** Настройка из листа Settings (key/value) — для триггера напоминаний */
+function setting_(key, def) {
+  try {
+    var rows = tblList_({ table: "Settings" }).rows;
+    for (var i = 0; i < rows.length; i++) if (String(rows[i].key) === key && String(rows[i].value) !== "") return rows[i].value;
+  } catch (e) {}
+  return def;
+}
+/** chat_id по телефону из Users (кто поделился номером в боте) */
+function chatByPhone_(phone) {
+  try {
+    var rows = tblList_({ table: "Users" }).rows;
+    for (var i = 0; i < rows.length; i++) if (rows[i].phone && samePhone_(rows[i].phone, phone)) return String(rows[i].chat_id || "");
+  } catch (e) {}
+  return "";
+}
+
 // ---------- telegram ----------
 function tgSend_(chatId, text) {
   if (!BOT_TOKEN || !chatId) return false;
@@ -552,39 +770,52 @@ function notify_(text) {
   if (ADMIN_CHAT_ID) tgSend_(ADMIN_CHAT_ID, text);
 }
 
-/** Напоминания за ~час. Запускается триггером каждые 15 минут. */
-function reminderTick_() {
+/**
+ * Напоминания. Запускается триггером каждые 15 минут.
+ * За сколько минут — настройка reminderMinutes в листе Settings (по умолчанию 60,
+ * меняется в админке → Настройки). chat_id берётся из слота, а если его нет —
+ * из листа Users по телефону (ученик поделился номером в боте).
+ */
+function reminderTick() {
   var sh = sheetByName_(SLOTS_SHEET_NAME, NEW_SLOT_HEADERS);
-  var cm = colMap_(sh).map;
-  if (!("date" in cm) || !("chat_id" in cm)) return;
-  var now = tutorNow_().getTime();
+  var cm0 = colMap_(sh);
+  ensureCol_(sh, cm0, "chat_id"); ensureCol_(sh, cm0, "reminded");
+  var cm = cm0.map;
+  if (!("date" in cm)) return;
+  var now = new Date().getTime();
+  var lead = +setting_("reminderMinutes", 60) || 60;
+  var tz = +setting_("tzOffsetMin", TUTOR_TZ_OFFSET_MIN) || TUTOR_TZ_OFFSET_MIN;
+  var tzLabel = String(setting_("tzLabel", "МСК+2"));
   rows_(sh).forEach(function (r, i) {
     if (normStatus_(r[cm.status]) !== "booked") return;
-    var chatId = String(r[cm.chat_id] || "").trim();
-    if (!chatId) return;
     if (String(r[cm.reminded] || "") === "yes") return;
     var pd = parseDsp_(normDate_(r[cm.date]));
     var tm = normTime_(r[cm.time]);
     if (!pd || !/^\d{2}:\d{2}$/.test(tm)) return;
-    var startUtc = Date.UTC(pd.y, pd.m - 1, pd.d, +tm.slice(0, 2), +tm.slice(3)) - TUTOR_TZ_OFFSET_MIN * 60000;
+    var startUtc = Date.UTC(pd.y, pd.m - 1, pd.d, +tm.slice(0, 2), +tm.slice(3)) - tz * 60000;
     var mins = (startUtc - now) / 60000;
-    if (mins > 45 && mins <= 75) {
+    // окно: [lead-15, lead] минут до начала (триггер раз в 15 минут)
+    if (mins <= lead && mins > lead - 16) {
+      var chatId = String(r[cm.chat_id] || "").trim();
+      if (!chatId && ("phone" in cm)) chatId = chatByPhone_(r[cm.phone]);
+      if (!chatId) return;
       var subj = ("subject" in cm) ? String(r[cm.subject] || "занятие") : "занятие";
-      var ok = tgSend_(chatId, "⏰ Напоминание: " + subj + " сегодня в " + tm + " (МСК+2).\nДо встречи! 🎓");
+      var ok = tgSend_(chatId, "⏰ Напоминание: " + subj + " сегодня в " + tm + " (" + tzLabel + ").\nДо встречи! 🎓");
       if (ok) {
         sh.getRange(i + 2, cm.reminded + 1).setValue("yes");
-        if (ADMIN_CHAT_ID) tgSend_(ADMIN_CHAT_ID, "⏰ Через час занятие: " + (r[cm.student] || "") + ", " + subj + ", " + tm + ", тел. " + (r[cm.phone] || ""));
+        if (ADMIN_CHAT_ID) tgSend_(ADMIN_CHAT_ID, "⏰ Скоро занятие: " + (r[cm.student] || "") + ", " + subj + ", " + tm + ", тел. " + (r[cm.phone] || ""));
       }
     }
   });
 }
 
-/** Запустить ОДИН РАЗ в редакторе — создаёт триггер напоминаний каждые 15 минут */
-function createReminderTrigger_() {
+/** Запустить ОДИН РАЗ в редакторе (выбрать в списке функций → ▶️) — создаёт триггер напоминаний каждые 15 минут */
+function createReminderTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === "reminderTick_") ScriptApp.deleteTrigger(t);
+    var h = t.getHandlerFunction();
+    if (h === "reminderTick" || h === "reminderTick_") ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger("reminderTick_").timeBased().everyMinutes(15).create();
+  ScriptApp.newTrigger("reminderTick").timeBased().everyMinutes(15).create();
 }
 
 // ---------- entry ----------
@@ -595,6 +826,12 @@ function route_(p) {
   if (a === "book") return book_(p);
   if (a === "myBookings") return myBookings_(p);
   if (a === "cancelBooking") return cancelBooking_(p);
+  if (a === "rescheduleBooking") return rescheduleBooking_(p);
+  if (a === "linkChat") return linkChat_(p);
+  if (a === "tblList") return tblList_(p);
+  if (a === "tblAppend") return tblAppend_(p);
+  if (a === "tblUpdate") return tblUpdate_(p);
+  if (a === "tblRemove") return tblRemove_(p);
   if (a === "getBookings") return getBookings_(p);
   if (a === "setBookingStatus") return setBookingStatus_(p);
   if (a === "getSchedule") return getSchedule_(p);

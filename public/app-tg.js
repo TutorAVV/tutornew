@@ -29,7 +29,8 @@
     subjects: ["Математика", "Физика"],
     subject: "", dates: [], date: "", slots: [], time: "",
     booking: false, tutorName: "Онлайн-уроки",
-    tzLabel: "МСК+2", chatId: "",
+    tzLabel: "МСК+2", chatId: "", grades: [], rescheduleHours: 12, tutorTg: "",
+    resched: null,
   };
 
   const EMOJI = { "Математика": "📐", "Физика": "⚛️" };
@@ -88,6 +89,7 @@
   function slotLabel(st) {
     if (st === "booked" || st === "busy") return "занято";
     if (st === "closed") return "закрыто";
+    if (st === "past") return "прошло";
     return `свободно`;
   }
 
@@ -124,7 +126,7 @@
     const el = $("#bookSummary");
     if (state.subject && state.date && state.time) {
       el.classList.add("ready");
-      el.textContent = `✅ ${state.subject} · ${fmtLong(state.date)} в ${state.time} (${state.tzLabel})`;
+      el.textContent = (state.resched ? "🔁 Новое время: " : "✅ ") + `${state.subject} · ${fmtLong(state.date)} в ${state.time} (${state.tzLabel})`;
     } else {
       el.classList.remove("ready");
       const need = [];
@@ -133,7 +135,7 @@
       el.textContent = need.length ? `Выберите ${need.join(" и ")} ↑` : "Заполните имя и телефон ↓";
     }
     if (tg && tg.MainButton) {
-      if (state.subject && state.date && state.time) { tg.MainButton.setText("Записаться ✅"); tg.MainButton.show(); }
+      if (state.subject && state.date && state.time) { tg.MainButton.setText(state.resched ? "Перенести 🔁" : "Записаться ✅"); tg.MainButton.show(); }
       else tg.MainButton.hide();
     }
   }
@@ -141,9 +143,96 @@
   // ---------- booking ----------
   function setErr(m) { $("#formErr").textContent = m || ""; }
 
+  function dsp(iso) { return iso.slice(8, 10) + "." + iso.slice(5, 7) + "." + iso.slice(0, 4); }
+
+  // ---------- reschedule ----------
+  function enterResched(b, phone) {
+    state.resched = { id: b.id, phone, subject: b.subject, dsp: b.dsp || dsp(b.iso), time: b.time };
+    $("#reschedBanner").classList.remove("hidden");
+    $("#reschedInfo").textContent = `${b.subject || ""} · ${state.resched.dsp} в ${b.time} → выберите новое время`;
+    $("#formFields").classList.add("hidden");
+    $("#formTitle").innerHTML = `<span class="step-n">4</span> Подтверждение переноса`;
+    $("#bookBtn").textContent = "Перенести на выбранное время";
+    $("#bookSuccess").classList.add("hidden");
+    $("#formStep").classList.remove("hidden");
+    if (b.subject && state.subjects.includes(b.subject)) selectSubject(b.subject);
+    state.time = ""; updateSummary();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function exitResched() {
+    state.resched = null;
+    $("#reschedBanner").classList.add("hidden");
+    $("#formFields").classList.remove("hidden");
+    $("#formTitle").innerHTML = `<span class="step-n">4</span> Ваши данные`;
+    $("#bookBtn").textContent = "Записаться на занятие";
+    state.time = ""; $$("#slotsGrid .slot").forEach((x) => x.classList.remove("selected"));
+    updateSummary();
+  }
+  async function submitResched() {
+    const rs = state.resched;
+    state.booking = true;
+    const btn = $("#bookBtn");
+    btn.disabled = true; btn.textContent = "Переносим… ⏳";
+    try {
+      const r = await fetch("/api/reschedule", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: rs.id, phone: rs.phone, date: state.date, time: state.time }),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || "Не получилось перенести");
+      haptic("success");
+      const newDate = state.date, newTime = state.time, subj = state.subject;
+      exitResched();
+      $("#formStep").classList.add("hidden");
+      const s = $("#bookSuccess");
+      s.classList.remove("hidden");
+      $("#successTitle").textContent = "Занятие перенесено!";
+      $("#successText").textContent = `${subj}, ${fmtLong(newDate)} в ${newTime} (${state.tzLabel}).`;
+      if (tg) { try { tg.MainButton.hide(); } catch (e) {} }
+      $("#myPhone").value = rs.phone; myFind();
+    } catch (e) {
+      setErr(e.message); haptic("error");
+      loadSlots();
+    } finally {
+      state.booking = false;
+      btn.disabled = false; btn.textContent = state.resched ? "Перенести на выбранное время" : "Записаться на занятие";
+    }
+  }
+
+  async function myFind() {
+    const phone = $("#myPhone").value.trim();
+    const err = $("#myErr"), list = $("#myList");
+    err.textContent = ""; list.innerHTML = "";
+    if (phone.replace(/\D/g, "").length < 10) { err.textContent = "Введите номер телефона из заявки"; return; }
+    list.innerHTML = `<div class="muted">Ищем… ⏳</div>`;
+    try {
+      const r = await fetch(`/api/my?phone=${encodeURIComponent(phone)}`);
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || "Не получилось найти");
+      try { localStorage.setItem("myPhone", phone); } catch (e) {}
+      if (!data.bookings.length) { list.innerHTML = `<div class="muted">Будущих записей нет.</div>`; return; }
+      const hrs = data.rescheduleHours || state.rescheduleHours;
+      list.innerHTML = data.bookings.map((b) => `
+        <div class="my-item">
+          <div><b>${b.subject || ""}</b> · ${b.dsp || dsp(b.iso || b.date)} в ${b.time}
+            ${b.canReschedule ? "" : `<div class="muted-sm">меньше ${hrs} ч — только через преподавателя</div>`}</div>
+          <button class="mini-btn" data-res="${b.id}" ${b.canReschedule ? "" : "disabled"}>🔁 Перенести</button>
+        </div>`).join("") +
+        `<div class="muted-sm" style="margin-top:8px">Перенос — не позже чем за ${hrs} ч. Отменить может только преподаватель${state.tutorTg ? ` — <a href="https://t.me/${state.tutorTg}">написать</a>` : ""}.</div>`;
+      $$("#myList [data-res]").forEach((btn) => btn.onclick = () => {
+        const b = data.bookings.find((x) => String(x.id) === btn.dataset.res);
+        if (b) enterResched(b, phone);
+      });
+    } catch (e) { err.textContent = e.message; list.innerHTML = ""; }
+  }
+
   async function submit() {
     if (state.booking) return;
     setErr("");
+    if (state.resched) {
+      if (!state.time) { setErr("Выберите новое время"); haptic("error"); return; }
+      return submitResched();
+    }
     const name = $("#fName").value.trim();
     const email = $("#fEmail").value.trim();
     const phone = $("#fPhone").value.trim();
@@ -178,8 +267,10 @@
       $("#formStep").classList.add("hidden");
       const s = $("#bookSuccess");
       s.classList.remove("hidden");
+      $("#successTitle").textContent = "Вы записаны!";
       $("#successText").textContent =
         `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}).`;
+      try { localStorage.setItem("myPhone", phone); } catch (e) {}
       if (tg) { try { tg.MainButton.hide(); tg.showAlert("Вы записаны! 🎉"); } catch (e) {} }
       s.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) {
@@ -198,6 +289,11 @@
       const cfg = await r.json();
       if (cfg.subjects && cfg.subjects.length) state.subjects = cfg.subjects;
       if (cfg.tzLabel) { state.tzLabel = cfg.tzLabel; $("#tzLabel").textContent = cfg.tzLabel; }
+      if (cfg.rescheduleHours) state.rescheduleHours = cfg.rescheduleHours;
+      if (cfg.tutorTg) state.tutorTg = cfg.tutorTg;
+      if (cfg.grades && cfg.grades.length) {
+        $("#fGrade").innerHTML = `<option value="">—</option>` + cfg.grades.map((g) => `<option>${g}</option>`).join("");
+      }
     } catch (e) {}
 
     try {
@@ -222,6 +318,10 @@
       $("#formStep").classList.remove("hidden");
       state.time = ""; loadSlots();
     };
+    $("#reschedCancel").onclick = exitResched;
+    $("#myFind").onclick = myFind;
+    $("#myPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") myFind(); });
+    try { const p = localStorage.getItem("myPhone"); if (p) { $("#myPhone").value = p; if (!$("#fPhone").value) $("#fPhone").value = p; myFind(); } } catch (e) {}
 
     loadSlots();
   }
