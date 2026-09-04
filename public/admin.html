@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Админ-панель — записи</title>
+<title>Админ-панель — Онлайн-уроки</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
@@ -27,7 +27,7 @@
 
   <div id="appView" class="hidden">
     <div class="admin-top">
-      <h1>🛠 Записи <span class="muted-sm" id="storageBadge"></span></h1>
+      <h1>🛠 Админ-панель <span class="muted-sm" id="storageBadge"></span></h1>
       <div class="spacer"></div>
       <a class="mini-btn" id="sheetLink" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none">📊 Google Таблица</a>
       <a class="mini-btn" href="/" style="text-decoration:none">← На сайт</a>
@@ -38,10 +38,13 @@
       <button class="tab active" data-tab="schedule">🗓 Расписание</button>
       <button class="tab" data-tab="bookings">📋 Заявки</button>
       <button class="tab" data-tab="slots">➕ Слоты</button>
-      <button class="tab" data-tab="help">❓ Настройка</button>
+      <button class="tab" data-tab="students">🎓 Ученики</button>
+      <button class="tab" data-tab="tg">✈️ Telegram <span class="pill p-new hidden" id="tgUnread"></span></button>
+      <button class="tab" data-tab="settings">⚙️ Настройки</button>
+      <button class="tab" data-tab="help">❓ Помощь</button>
     </div>
 
-    <!-- SCHEDULE: все слоты 60 дней, включая занятые -->
+    <!-- SCHEDULE -->
     <div class="panel" id="tab-schedule">
       <div class="toolbar">
         <input id="schFrom" type="date"> — <input id="schTo" type="date">
@@ -59,12 +62,7 @@
         <button class="mini-btn" id="clrClose">Закрыть</button>
         <button class="mini-btn danger" id="clrDelete">Удалить</button>
       </div>
-      <div style="overflow-x:auto">
-      <table class="tbl" id="schTable">
-        <thead><tr><th>Дата</th><th>Время</th><th>Длит.</th><th>Статус</th><th>Ученик</th><th>Действие</th></tr></thead>
-        <tbody><tr><td colspan="6" class="muted">Загрузка…</td></tr></tbody>
-      </table>
-      </div>
+      <div id="schDays"><div class="muted">Загрузка…</div></div>
     </div>
 
     <!-- BOOKINGS -->
@@ -89,7 +87,7 @@
       </div>
     </div>
 
-    <!-- SLOTS: добавление + генерация -->
+    <!-- SLOTS -->
     <div class="panel hidden" id="tab-slots">
       <h3>Добавить слот</h3>
       <div class="toolbar">
@@ -123,24 +121,110 @@
       <div class="muted-sm">Или точное время через запятую (вместо окон): <input id="genTimes" type="text" placeholder="16:00,17:00,18:00" style="min-width:200px"></div>
     </div>
 
+    <!-- STUDENTS -->
+    <div class="panel hidden" id="tab-students">
+      <div class="toolbar">
+        <input id="stSearch" type="text" placeholder="Поиск: имя, телефон, класс…">
+        <button class="mini-btn" id="stReload">🔄 Обновить</button>
+        <span class="muted-sm" id="stCount"></span>
+      </div>
+      <div class="split">
+        <div class="split-list" id="stList"><div class="muted">Загрузка…</div></div>
+        <div class="split-detail" id="stDetail"><div class="muted">Выберите ученика слева. Карточка создаётся автоматически при первой записи.</div></div>
+      </div>
+    </div>
+
+    <!-- TELEGRAM -->
+    <div class="panel hidden" id="tab-tg">
+      <div id="tgStatus" class="muted-sm" style="margin-bottom:12px">Проверяем бота…</div>
+      <div class="split">
+        <div class="split-list">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="mini-btn" id="tgReload">🔄</button>
+            <button class="mini-btn" id="tgBroadcastBtn">📢 Рассылка всем</button>
+          </div>
+          <div id="tgUsers"><div class="muted">Загрузка…</div></div>
+        </div>
+        <div class="split-detail">
+          <div id="tgChatHead" class="muted">Выберите пользователя слева — здесь появится переписка. Пользователи попадают сюда после /start в боте.</div>
+          <div class="chat" id="tgChat"></div>
+          <div class="chat-send hidden" id="tgSendBox">
+            <textarea id="tgText" rows="3" placeholder="Сообщение от бота этому человеку…"></textarea>
+            <button class="btn btn-primary" id="tgSend">Отправить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- broadcast dialog -->
+      <div class="modal hidden" id="bcModal">
+        <div class="modal-card">
+          <h3>📢 Массовая рассылка</h3>
+          <p class="muted-sm">Сообщение получат <b id="bcCount">0</b> пользователей бота (все, кто нажимал /start и не заблокировал бота). Отменить отправку после нажатия нельзя.</p>
+          <textarea id="bcText" rows="5" placeholder="Например: Здравствуйте! Сегодня заболел(а), занятия на 5 сентября переносятся. Выберите новое время на сайте или напишите мне."></textarea>
+          <label class="muted-sm" style="display:block;margin-top:10px">Для подтверждения введите слово <b>РАЗОСЛАТЬ</b>
+            <input id="bcConfirm" type="text" placeholder="РАЗОСЛАТЬ" autocomplete="off" style="display:block;margin-top:6px;width:100%">
+          </label>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="bcCancel">Отмена</button>
+            <button class="btn btn-primary" id="bcSend" disabled>Отправить всем</button>
+          </div>
+          <div class="form-err" id="bcErr"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="panel hidden" id="tab-settings">
+      <p class="muted-sm">Эти настройки применяются к сайту сразу после сохранения, без правки кода и без перезапуска (хранятся в таблице, лист <span class="kbd">Settings</span>). Секреты (токен бота, пароль админки, ссылка на скрипт) остаются в Render → Environment.</p>
+      <div id="settingsForm" class="settings-grid"><div class="muted">Загрузка…</div></div>
+      <div class="toolbar" style="margin-top:14px">
+        <button class="btn btn-primary" id="setSave">💾 Сохранить</button>
+        <button class="mini-btn" id="setReset">Сбросить к значениям по умолчанию</button>
+        <span class="muted-sm" id="setMsg"></span>
+      </div>
+      <h3 style="margin-top:22px">Состояние подключений</h3>
+      <div id="envState" class="muted-sm"></div>
+    </div>
+
     <!-- HELP -->
     <div class="panel hidden" id="tab-help">
       <h3>Где лежат данные</h3>
       <p id="storageText" class="muted"></p>
-      <h3>⚠️ Слоты есть в таблице, но их нет на сайте?</h3>
+      <p class="muted-sm">Листы таблицы: <span class="kbd">Slots</span> (слоты), <span class="kbd">Bookings</span> (заявки), <span class="kbd">Settings</span> (настройки сайта), <span class="kbd">Users</span> (пользователи бота), <span class="kbd">Messages</span> (переписка/рассылки), <span class="kbd">Students</span> (карточки учеников), <span class="kbd">Notes</span> (домашки/сообщения в кабинет). Все листы создаются автоматически. Колонка <span class="kbd">format</span> в Bookings не используется — её можно удалить.</p>
+
+      <h3>⚠️ Ошибка «You can't set the number format of cells in a typed column»</h3>
+      <p class="muted-sm">В таблице у колонки <span class="kbd">date</span> или <span class="kbd">time</span> включён «тип колонки» (Sheets → таблица/типизированная колонка). Код v3 это обходит автоматически — просто обновите <span class="kbd">Code.gs</span> и сделайте <b>Новую версию</b> развертывания. Если хотите убрать причину: выделите колонки date/time → Формат → Число → Обычный текст, либо преобразуйте «таблицу» обратно в диапазон.</p>
+
+      <h3>⚠️ Слоты есть в таблице, но их нет на сайте</h3>
       <ol class="side-list">
-        <li>Убедитесь, что в Apps Script вставлен <b>актуальный</b> <span class="kbd">Code.gs</span> из репозитория (v2 понимает старый формат таблицы).</li>
+        <li>Убедитесь, что в Apps Script вставлен <b>актуальный</b> <span class="kbd">Code.gs</span> из репозитория (вверху написано «v3»).</li>
         <li>После изменения кода: <b>Развернуть → Управление развертываниями → ✏️ → Новая версия</b>. Без этого сайт видит старый код!</li>
         <li>Проверьте <span class="kbd">SHEET_ID</span> и <span class="kbd">API_SECRET</span> (= как в Render).</li>
+        <li>Диагностика: откройте <span class="kbd">/api/slots?date=ГГГГ-ММ-ДД</span> — должен прийти JSON. Если <span class="kbd">forbidden</span> — не совпадает API_SECRET.</li>
       </ol>
-      <h3>Напоминания за час в Telegram</h3>
+
+      <h3>Telegram-бот: уведомления, рассылки, напоминания</h3>
       <ol class="side-list">
-        <li>В <span class="kbd">Code.gs</span> заполните <span class="kbd">BOT_TOKEN</span> и <span class="kbd">ADMIN_CHAT_ID</span>.</li>
-        <li>В редакторе Apps Script выберите функцию <span class="kbd">createReminderTrigger</span> → ▶️ → разрешите доступ. Триггер проверяет занятия каждые 15 минут.</li>
-        <li>Напоминание приходит ученикам, которые записывались <b>через Telegram-бота</b> (тогда сохраняется chat id). Плюс копия — вам.</li>
+        <li>@BotFather → /newbot → токен в Render → <span class="kbd">BOT_TOKEN</span>. Свой chat id (@userinfobot) → <span class="kbd">ADMIN_CHAT_ID</span>. Адрес сайта → <span class="kbd">PUBLIC_URL</span>.</li>
+        <li>Вкладка <b>Telegram</b> → «Подключить вебхук» (один раз). После этого бот отвечает на /start, просит поделиться номером, а все сообщения учеников попадают в админку.</li>
+        <li>Чтобы напоминания приходили ученику, он должен нажать /start в боте и <b>поделиться номером</b> — номер связывается с его записями.</li>
+        <li>Для самих напоминаний: в <span class="kbd">Code.gs</span> заполните <span class="kbd">BOT_TOKEN</span> и <span class="kbd">ADMIN_CHAT_ID</span>, в редакторе выберите функцию <span class="kbd">createReminderTrigger</span> → ▶️ → разрешите доступ. За сколько минут напоминать — в Настройках.</li>
+        <li>@BotFather → /setmenubutton → адрес <span class="kbd">https://ваш-сайт/telegram.html</span> — кнопка «приложение» в боте.</li>
       </ol>
-      <h3>Telegram-бот</h3>
-      <p class="muted">BotFather → /newbot → токен в <span class="kbd">BOT_TOKEN</span> → /setmenubutton → адрес сайта. Подробно — в <span class="kbd">README.md</span>.</p>
+
+      <h3>Перенос и отмена занятий</h3>
+      <p class="muted-sm">Ученик может только <b>записаться</b> и <b>перенести</b> занятие (не позже чем за N часов — задаётся в Настройках). <b>Отменить</b> может только преподаватель: вкладка Заявки → «Отменить» (слот освобождается, ученику уходит сообщение в Telegram, если он привязан).</p>
+
+      <h3>Личный кабинет ученика</h3>
+      <p class="muted-sm">Страница <span class="kbd">/cabinet.html</span>, вход по номеру телефона (тестовый режим, без пароля). Ученик видит свои занятия, статистику, темы и сообщения преподавателя (домашки/ссылки). Отправлять их — во вкладке Ученики. Отключить кабинет можно в Настройках.</p>
+
+      <h3>Если что-то сломалось</h3>
+      <ol class="side-list">
+        <li>Сайт не открывается / долго грузится — free-тариф Render «засыпает», первый визит 30–60 сек. Логи: Render → Logs.</li>
+        <li>Ошибка при записи — проверьте, что Apps Script развернут <b>новой версией</b> и доступ «Все».</li>
+        <li>Не приходят уведомления — проверьте BOT_TOKEN/ADMIN_CHAT_ID (в Render и в Code.gs) и что вы нажали /start в боте.</li>
+        <li>Сбросить настройки сайта — Настройки → «Сбросить», либо очистить лист Settings.</li>
+      </ol>
     </div>
   </div>
 </div>

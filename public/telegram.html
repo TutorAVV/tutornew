@@ -14,8 +14,16 @@
 <main style="padding: 16px 0;">
 <section class="section" id="booking" style="padding: 0;">
   <div class="wrap">
-    <h2>Запись на занятие</h2>
+    <h2 id="pageTitle">Запись на занятие</h2>
     <p class="sub">Выберите предмет, дату и время. Напоминание придёт сюда, в Telegram.</p>
+
+    <div class="resched-banner hidden" id="reschedBanner">
+      <div>
+        <b>🔁 Перенос занятия</b>
+        <div class="muted-sm" id="reschedInfo"></div>
+      </div>
+      <button class="mini-btn" id="reschedCancel">Отмена</button>
+    </div>
 
     <div class="book" style="grid-template-columns: 1fr;">
       <div class="book-main">
@@ -35,8 +43,9 @@
         </div>
 
         <div class="step" id="formStep">
-          <div class="step-title"><span class="step-n">4</span> Ваши данные</div>
+          <div class="step-title" id="formTitle"><span class="step-n">4</span> Ваши данные</div>
           <div class="form">
+            <div id="formFields">
             <div class="row2">
               <label>Фамилия Имя*
                 <input id="fName" type="text" placeholder="Иванов Иван" autocomplete="name" maxlength="80">
@@ -60,6 +69,7 @@
             <label style="margin-top:12px">Комментарий
               <input id="fComment" type="text" placeholder="Темы, цель, пожелания…" maxlength="200">
             </label>
+            </div>
             <div class="summary" id="bookSummary">Выберите дату и время ↑</div>
             <button class="btn btn-primary btn-lg btn-block" id="bookBtn">Записаться на занятие</button>
             <div class="form-err" id="formErr"></div>
@@ -68,7 +78,7 @@
 
         <div class="success hidden" id="bookSuccess">
           <div class="success-emoji">🎉</div>
-          <h3>Вы записаны!</h3>
+          <h3 id="successTitle">Вы записаны!</h3>
           <p id="successText"></p>
           <p class="muted" id="remindNote">⏰ За час до занятия пришлём напоминание сюда, в Telegram.</p>
           <div class="success-btns center" style="margin-top: 16px;">
@@ -76,6 +86,21 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="my" style="padding: 8px 0 24px;">
+  <div class="wrap">
+    <h2 style="font-size:20px">🔁 Мои записи</h2>
+    <p class="sub" style="margin-bottom:12px">Номер телефона из заявки — покажем будущие занятия, их можно перенести.</p>
+    <div class="panel-lite" style="padding:14px">
+      <div class="my-row">
+        <input id="myPhone" type="tel" placeholder="+7 999 123-45-67" inputmode="tel">
+        <button class="btn btn-primary" id="myFind">Найти</button>
+      </div>
+      <div class="form-err" id="myErr"></div>
+      <div id="myList"></div>
     </div>
   </div>
 </section>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Кабинет ученика — Онлайн-уроки</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+<header class="header">
+  <div class="wrap header-in">
+    <a class="logo" href="/">📐 <span id="logoName">Онлайн-уроки</span></a>
+    <nav class="nav" id="nav">
+      <a href="/#booking">Запись</a>
+      <a href="/#contacts">Контакты</a>
+    </nav>
+    <div class="header-cta">
+      <button class="theme-btn" id="themeBtn">🌙 Тёмная тема</button>
+      <button class="mini-btn hidden" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+</header>
+
+<main class="section">
+  <div class="wrap narrow">
+    <div id="loginBox" class="panel-lite">
+      <h2>🎓 Кабинет ученика</h2>
+      <p class="sub">Введите номер телефона, который указывали при записи. <span class="muted-sm">(тестовый режим: без пароля)</span></p>
+      <div class="my-row">
+        <input id="cPhone" type="tel" placeholder="+7 999 123-45-67" inputmode="tel">
+        <button class="btn btn-primary" id="cEnter">Войти</button>
+      </div>
+      <div class="form-err" id="cErr"></div>
+    </div>
+
+    <div id="cab" class="hidden">
+      <div class="cab-head">
+        <div>
+          <h2 id="cName">Ученик</h2>
+          <div class="muted" id="cMeta"></div>
+        </div>
+        <a class="btn btn-primary btn-sm" href="/#booking">📅 Записаться</a>
+      </div>
+
+      <div class="stats-row" id="cStats"></div>
+
+      <div class="cab-grid">
+        <div class="panel-lite">
+          <h3>📅 Ближайшие занятия</h3>
+          <div id="cUpcoming"></div>
+          <div class="muted-sm" id="cReschedNote" style="margin-top:8px"></div>
+        </div>
+        <div class="panel-lite">
+          <h3>📨 От преподавателя</h3>
+          <div id="cNotes"></div>
+        </div>
+        <div class="panel-lite">
+          <h3>📚 Пройденные темы</h3>
+          <div id="cTopics" class="muted"></div>
+        </div>
+        <div class="panel-lite">
+          <h3>🕓 История занятий</h3>
+          <div id="cHistory"></div>
+        </div>
+      </div>
+
+      <div class="panel-lite hidden" id="cTgHint" style="margin-top:16px">
+        <b>✈️ Telegram не привязан.</b> <span class="muted">Откройте бота, нажмите /start и поделитесь номером — тогда напоминания и домашние задания будут приходить в Telegram.</span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-in">
+    <div>© <span id="year"></span> <span id="footName">Онлайн-уроки</span></div>
+    <div class="footer-links"><a href="/">На главную</a></div>
+  </div>
+</footer>
+<script src="/cabinet.js"></script>
+</body>
+</html>

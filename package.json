@@ -1,7 +1,7 @@
 {
   "name": "tutor-booking",
-  "version": "1.0.0",
-  "description": "Сайт репетитора: запись на ЕГЭ/ОГЭ + Telegram WebApp + Google Sheets + админка. Деплой на Render.com (free).",
+  "version": "3.0.0",
+  "description": "Онлайн-уроки: запись слотами, перенос, Telegram-бот (рассылки, переписка), кабинет ученика, Google Sheets, админка. Render.com (free).",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
