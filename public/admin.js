@@ -8,6 +8,7 @@
   let bookings = [], schedule = [], students = [], tgUsers = [], curStudent = null, curChat = null, settingsMeta = [], settingsDefaults = {};
   let tgTimer = null;
   let schCalMonth = null, schCalSel = null;
+  let schRange = null, schLoadState = "idle", schLoadRequest = 0;
 
   const ST_RU = { new: "Новая", confirmed: "Подтверждена", done: "Завершена", cancelled: "Отменена" };
   const SL_RU = { open: "свободен", booked: "занят", closed: "закрыт" };
@@ -92,13 +93,35 @@
 
   // ---------- schedule (сгруппировано по дням) ----------
   async function loadSchedule() {
+    const from = $("#schFrom").value, to = $("#schTo").value;
+    if (!from || !to || from > to) { toast("Выберите корректный диапазон дат", "err"); return; }
+    const request = ++schLoadRequest;
     const box = $("#schDays");
+    schLoadState = "loading";
     box.innerHTML = `<div class="muted">Загрузка…</div>`;
+    if (!$("#calModal").classList.contains("hidden")) renderSchCalendarModal();
     try {
-      const data = await api(`/api/schedule?from=${$("#schFrom").value}&to=${$("#schTo").value}`, { headers: H() });
+      const data = await api(`/api/schedule?from=${from}&to=${to}`, { headers: H() });
+      if (request !== schLoadRequest) return;
+      if (!data.ok) throw new Error(data.error || "Ошибка загрузки расписания");
       schedule = data.slots || [];
+      const rangeChanged = !schRange || schRange.from !== from || schRange.to !== to;
+      schRange = { from, to };
+      if (rangeChanged || !schCalMonth) {
+        const today = isoToday(0);
+        schCalSel = today >= from && today <= to ? today : from;
+        const d = new Date(schCalSel + "T00:00:00");
+        schCalMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+      }
+      schLoadState = "ready";
       renderSchedule();
-    } catch (e) { if (e.message !== "unauthorized") box.innerHTML = `<div class="muted">Ошибка загрузки</div>`; }
+    } catch (e) {
+      if (request !== schLoadRequest) return;
+      schLoadState = "error";
+      if (e.message !== "unauthorized") box.innerHTML = `<div class="muted">Не удалось загрузить расписание. Нажмите «Показать», чтобы попробовать снова.</div>`;
+    } finally {
+      if (request === schLoadRequest && !$("#calModal").classList.contains("hidden")) renderSchCalendarModal();
+    }
   }
   /** Перерисовать расписание, не потеряв позицию прокрутки */
   async function loadScheduleKeep() {
@@ -107,14 +130,36 @@
     window.scrollTo({ top: y });
   }
 
+  function renderScheduleTable(list) {
+    return `<table class="tbl tbl-day">
+      <thead><tr><th style="width:70px">Время</th><th style="width:60px">Длит.</th><th style="width:100px">Статус</th><th>Ученик</th><th class="col-act">Действие</th></tr></thead>
+      <tbody>${list.map((s) => {
+        const who = s.student
+          ? `<b>${esc(s.student)}</b>${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ""}${s.subject ? ` <span class="muted-sm">· ${esc(s.subject)}</span>` : ""}${s.email ? `<br><span class="muted-sm">${esc(s.email)}</span>` : ""}`
+          : `<span class="muted">—</span>`;
+        const acts = s.status === "booked"
+          ? `<button class="mini-btn" data-free="${s.iso}|${s.time}">Освободить</button>`
+          : (s.status === "open"
+            ? `<button class="mini-btn" data-close="${s.iso}|${s.time}">Закрыть</button>`
+            : `<button class="mini-btn" data-open="${s.iso}|${s.time}">Открыть</button>`);
+        return `<tr>
+          <td><b>${esc(s.time)}</b></td><td>${esc(s.duration)}</td>
+          <td><span class="pill p-${s.status === "open" ? "free" : s.status === "booked" ? "busy" : "cancelled"}">${esc(SL_RU[s.status] || s.status)}</span></td>
+          <td>${who}</td>
+          <td class="col-act"><div class="rowbtns">${acts}<button class="mini-btn danger" data-del="${s.iso}|${s.time}" title="Удалить слот">✕</button></div></td>
+        </tr>`;
+      }).join("")}</tbody>
+    </table>`;
+  }
+
   function renderSchedule() {
-    const f = $("#schStatus").value;
-    const rows = schedule.filter((s) => !f || s.status === f);
+    const days = scheduleDaysMap();
     const box = $("#schDays");
-    if (!rows.length) { box.innerHTML = `<div class="muted">Слотов нет — добавьте во вкладке «Слоты»</div>`; return; }
-    const days = {};
-    for (const s of rows) (days[s.iso] = days[s.iso] || []).push(s);
-    // Список по дням (как раньше). Календарь — отдельным pop-up по кнопке «Календарь».
+    if (!Object.keys(days).length) {
+      box.innerHTML = `<div class="muted">${$("#schStatus").value ? "Слотов с выбранным статусом нет" : "В выбранном периоде слотов нет — добавьте во вкладке «Слоты»"}</div>`;
+      return;
+    }
+    // Список по дням. Календарь — отдельным pop-up по кнопке «Календарь».
     box.innerHTML = Object.keys(days).sort().map((iso) => {
       const list = days[iso];
       const busy = list.filter((s) => s.status === "booked").length, free = list.filter((s) => s.status === "open").length;
@@ -122,25 +167,7 @@
       return `<div class="day-card${selected}" id="day-${esc(iso)}">
         <div class="day-head"><b>${esc(dayTitle(iso))}</b>
           <span class="muted-sm">${free ? `свободно ${free}` : ""}${free && busy ? " · " : ""}${busy ? `занято ${busy}` : ""}</span></div>
-        <table class="tbl tbl-day">
-          <thead><tr><th style="width:70px">Время</th><th style="width:60px">Длит.</th><th style="width:100px">Статус</th><th>Ученик</th><th class="col-act">Действие</th></tr></thead>
-          <tbody>${list.map((s) => {
-            const who = s.student
-              ? `<b>${esc(s.student)}</b>${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ""}${s.subject ? ` <span class="muted-sm">· ${esc(s.subject)}</span>` : ""}${s.email ? `<br><span class="muted-sm">${esc(s.email)}</span>` : ""}`
-              : `<span class="muted">—</span>`;
-            const acts = s.status === "booked"
-              ? `<button class="mini-btn" data-free="${s.iso}|${s.time}">Освободить</button>`
-              : (s.status === "open"
-                ? `<button class="mini-btn" data-close="${s.iso}|${s.time}">Закрыть</button>`
-                : `<button class="mini-btn" data-open="${s.iso}|${s.time}">Открыть</button>`);
-            return `<tr>
-              <td><b>${esc(s.time)}</b></td><td>${esc(s.duration)}</td>
-              <td><span class="pill p-${s.status === "open" ? "free" : s.status === "booked" ? "busy" : "cancelled"}">${SL_RU[s.status] || s.status}</span></td>
-              <td>${who}</td>
-              <td class="col-act"><div class="rowbtns">${acts}<button class="mini-btn danger" data-del="${s.iso}|${s.time}" title="Удалить слот">✕</button></div></td>
-            </tr>`;
-          }).join("")}</tbody>
-        </table>
+        ${renderScheduleTable(list)}
       </div>`;
     }).join("");
     bindScheduleActions(box);
@@ -162,20 +189,74 @@
     return days;
   }
   function openSchCalendar() {
-    const modal = $("#calModal");
-    if (!modal) return;
-    if (!schedule.length) { toast("Сначала нажмите «Показать» — загрузим расписание", "err"); return; }
-    modal.classList.remove("hidden");
+    $("#calModal").classList.remove("hidden");
     renderSchCalendarModal();
+    if (schLoadState === "idle" || schLoadState === "error") loadSchedule();
   }
   function closeSchCalendar() {
     const modal = $("#calModal");
     if (modal) modal.classList.add("hidden");
   }
+  function renderAdminCalendar(days) {
+    const y = schCalMonth.getFullYear(), m = schCalMonth.getMonth();
+    const title = schCalMonth.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+    const firstDow = (new Date(y, m, 1).getDay() + 6) % 7; // Пн = 0
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const today = isoToday(0);
+    const colors = { open: "done", booked: "confirmed", closed: "cancelled" };
+    let cells = `<div class="admin-cal-cell off" aria-hidden="true"></div>`.repeat(firstDow);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const list = days[iso] || [];
+      const outside = iso < schRange.from || iso > schRange.to;
+      const chips = list.slice(0, 2).map((s) => {
+        const label = [s.time, SL_RU[s.status] || s.status, s.student, s.subject].filter(Boolean).join(" · ");
+        return `<span class="cal-chip c-${colors[s.status] || "new"}" title="${esc(label)}">${esc(s.time)} ${esc(s.student || SL_RU[s.status] || s.status)}</span>`;
+      }).join("");
+      cells += `<button type="button" class="admin-cal-cell${iso === schCalSel ? " sel" : ""}${iso === today ? " today" : ""}${outside ? " outside" : ""}"
+        data-cal-day="${iso}" aria-pressed="${iso === schCalSel}"${iso === today ? ` aria-current="date"` : ""} aria-label="${esc(dayTitle(iso))} · ${outside ? "вне загруженного периода" : `слотов: ${list.length}`}">
+        <span class="cal-num">${d}</span>
+        <span class="admin-cal-chips">${chips}${list.length > 2 ? `<span class="admin-cal-more">+${list.length - 2}</span>` : ""}</span>
+      </button>`;
+    }
+    const selectedSlots = days[schCalSel] || [];
+    const outside = schCalSel < schRange.from || schCalSel > schRange.to;
+    const emptyText = outside
+      ? "Этот день вне загруженного периода. Измените даты в расписании и нажмите «Показать»."
+      : $("#schStatus").value ? "На этот день нет слотов с выбранным статусом." : "На этот день слотов нет.";
+    return `<div class="admin-cal">
+      <div class="admin-cal-head">
+        <button type="button" class="mini-btn" data-cal-nav="-1" aria-label="Предыдущий месяц">‹</button>
+        <b>${esc(title.charAt(0).toUpperCase() + title.slice(1))}</b>
+        <button type="button" class="mini-btn" data-cal-nav="1" aria-label="Следующий месяц">›</button>
+        <button type="button" class="mini-btn" data-cal-today>Сегодня</button>
+      </div>
+      <p class="muted-sm">Слоты за ${dtRu(schRange.from)} — ${dtRu(schRange.to)}. Период можно изменить в расписании кнопкой «Показать».</p>
+      <div class="admin-cal-weekdays">${[...WD.slice(1), WD[0]].map((d) => `<span>${d.charAt(0).toUpperCase() + d.slice(1)}</span>`).join("")}</div>
+      <div class="admin-cal-grid">${cells}</div>
+      <div class="cal-legend">
+        <span><i class="dot d-done"></i>свободен</span>
+        <span><i class="dot d-confirmed"></i>занят</span>
+        <span><i class="dot d-cancelled"></i>закрыт</span>
+      </div>
+    </div>
+    <h4 class="cal-day-title">${esc(dayTitle(schCalSel))}</h4>
+    ${selectedSlots.length ? `<div class="day-card">${renderScheduleTable(selectedSlots)}</div>` : `<p class="muted-sm">${emptyText}</p>`}`;
+  }
+
   function renderSchCalendarModal() {
     const body = $("#calModalBody");
     if (!body) return;
-    body.innerHTML = renderAdminCalendar(scheduleDaysMap());
+    const go = $("#calGoDay");
+    if (schLoadState !== "ready") {
+      body.innerHTML = `<div class="muted" role="status">${schLoadState === "error" ? "Не удалось загрузить расписание. Закройте календарь и нажмите «Показать», чтобы попробовать снова." : "Загрузка расписания…"}</div>`;
+      go.disabled = true;
+      return;
+    }
+    const days = scheduleDaysMap();
+    body.innerHTML = renderAdminCalendar(days);
+    bindScheduleActions(body);
+    go.disabled = !(days[schCalSel] || []).length;
     $$("#calModalBody [data-cal-day]").forEach((b) => b.onclick = () => {
       schCalSel = b.dataset.calDay;
       renderSchCalendarModal();
@@ -190,8 +271,7 @@
       renderSchCalendarModal(); renderSchedule();
     });
     // «Перейти к дню» — закрыть календарь и прокрутить к карточке дня в списке
-    const go = $("#calGoDay");
-    if (go) go.onclick = () => {
+    go.onclick = () => {
       closeSchCalendar();
       const target = schCalSel && $("#day-" + schCalSel);
       if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -558,7 +638,7 @@
     const box = $("#tgChat");
     box.innerHTML = list.length ? list.map((m) => `
       <div class="msg ${m.dir === "in" ? "in" : "out"}">
-        <div>${esc(m.text)}</div>
+        <div class="msg-text">${esc(m.text)}</div>
         <div class="msg-meta">${fmtTs(m.ts)}${m.kind === "broadcast" ? " · рассылка" : ""}${m.status && m.status !== "ok" ? " · ⚠️ " + esc(m.status) : ""}</div>
       </div>`).join("") : `<div class="muted-sm">Сообщений ещё нет.</div>`;
     box.scrollTop = box.scrollHeight;
@@ -964,10 +1044,11 @@
       const answerPreview = (list) => list.map((d) => `
         <div class="q-preview">
           <b>${d.i + 1}. ${esc(d.text)}</b>
-          <span class="muted-sm">ответ ученика: <b>${esc(d.given)}</b> ${d.ok ? "✅" : "❌"}</span>
+          <span class="muted-sm tst-answer">ответ ученика: <b>${esc(d.given)}</b> ${d.ok ? "✅" : "❌"}</span>
         </div>`).join("");
+      const attemptPreview = (title, detail) => `<section class="tst-attempt"><h5>${esc(title)}</h5>${answerPreview(detail)}</section>`;
       box.innerHTML = `<h4 style="margin:0 0 8px">Отправки и результаты</h4>` + r.assignments.map((a) => `
-        <div class="note-item" style="flex-direction:column;align-items:stretch">
+        <div class="tst-result">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
             <div><b>${esc(a.name || (a.guest ? "Пустой ученик (введёт ФИО сам)" : "Ученик"))}</b>
               ${a.guest ? `<span class="muted-sm">🕊 по ссылке</span>` : `<a href="tel:${esc(a.phone)}" class="muted-sm">${esc(a.phone)}</a>`}
@@ -996,13 +1077,13 @@
         if (!det.classList.contains("hidden")) { det.classList.add("hidden"); return; }
         const a = r.assignments.find((x) => x.id === b.dataset.tdet);
         det.classList.remove("hidden");
-        const current = a.detail && a.detail.length
-          ? `<h5 style="margin:10px 0 4px">${a.attempts && a.attempts > 1 ? `Попытка ${a.attempts}` : "Текущая попытка"} (${a.score != null ? `${a.score}/${a.total}` : ""})</h5>` + answerPreview(a.detail)
-          : "";
-        const history = (a.history || []).slice().reverse().map((h) => `
-          <h5 style="margin:12px 0 4px">Попытка ${h.n} · ${fmtTs(h.finishedAt)} · ${h.score}/${h.total}</h5>
-          ${answerPreview(h.detail || [])}`).join("") || "";
-        det.innerHTML = `<div class="muted-sm">${esc(a.name || "Ученик")} · попыток: ${a.attempts || 0}</div>` + (history || current ? history + current : (a.status === "finished" || a.answered ? answerPreview(a.detail || []) : ""));
+        const attemptNo = Math.max(1, (+a.attempts || 0) + (a.status === "finished" ? 0 : 1));
+        const currentTitle = `Попытка ${attemptNo}${a.status !== "finished" ? " · в процессе" : ""}${a.status === "finished" && a.finishedAt ? " · " + fmtTs(a.finishedAt) : ""}${a.score != null ? ` · ${a.score}/${a.total}` : ""}`;
+        const current = a.detail && a.detail.length ? attemptPreview(currentTitle, a.detail) : "";
+        const history = (a.history || []).slice().reverse().map((h) =>
+          attemptPreview(`Попытка ${h.n} · ${fmtTs(h.finishedAt)} · ${h.score}/${h.total}`, h.detail || [])).join("");
+        det.innerHTML = `<div class="muted-sm">${esc(a.name || "Ученик")} · попыток: ${a.attempts || 0}</div>
+          <div class="tst-attempts">${history}${current}</div>`;
       });
       $$("#tAssignList [data-tcancel]").forEach((b) => b.onclick = async () => {
         if (!confirm("Отменить эту попытку? Тест скроется из кабинета ученика (ссылка перестанет работать).")) return;
@@ -1055,6 +1136,7 @@
     if (!TAB_NAMES.includes(name)) name = "schedule";
     $$(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
     TAB_NAMES.forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== name));
+    if (name === "schedule") loadSchedule();
     if (name === "students") loadStudents();
     if (name === "tests") loadTests();
     if (name === "settings") loadSettings();
@@ -1080,9 +1162,9 @@
     $("#logoutBtn").onclick = () => { sessionStorage.removeItem("adminKey"); showApp(false); };
 
     $("#schFrom").value = isoToday(0);
-    $("#schTo").value = oneMonthForward();
+    $("#schTo").value = isoToday(13); // 14 дней, включая сегодня; границы периода включительны.
     $("#schLoad").onclick = loadSchedule;
-    $("#schStatus").onchange = () => { renderSchedule(); if (!$("#calModal").classList.contains("hidden")) renderSchCalendarModal(); };
+    $("#schStatus").onchange = () => { if (schLoadState === "ready") renderSchedule(); if (!$("#calModal").classList.contains("hidden")) renderSchCalendarModal(); };
     $("#schCal").onclick = openSchCalendar;
     $("#calClose").onclick = closeSchCalendar;
     $("#calDone").onclick = closeSchCalendar;
