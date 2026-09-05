@@ -911,8 +911,10 @@ function testView_(a, tst) {
       outQ.push({ type: q.type, text: q.text, options: q.options || [], multi: !!q.multi });
     }
   }
+  var guest = String(a.guest || "") === "1";
   return {
     ok: true, title: String(tst.title || "Тест"), student: String(a.name || ""),
+    guest: guest, needName: guest && String(a.name || "").trim() === "",
     count: questions.length, feedback: feedback, showScore: showScore,
     noCopy: flagOn_(tst.noCopy),
     maxAttempts: maxAttempts, attempts: attempts, canRetry: finished && attempts < maxAttempts,

@@ -60,11 +60,44 @@
       if (T.student) { $("#tName").textContent = T.student; $("#tName").classList.remove("hidden"); }
       applyNoCopy();
       headerMeta();
+      if (T.needName) return renderGuestName();
       if (T.status === "finished") return renderFinish(true);
       cur = firstUnanswered();
       if (cur >= T.count) return finish();
       renderQuestion();
     } catch (e) { renderError(e.message); }
+  }
+  function renderGuestName() {
+    $("#quiz").innerHTML = `
+      <div class="panel-center">
+        <div style="font-size:44px">🕊</div>
+        <h3>Тест отправлен «пустому ученику»</h3>
+        <p class="muted">Введите своё ФИО — оно появится у преподавателя в результатах. В общий список учеников сайта вы не добавитесь.</p>
+        <input class="quiz-input" id="guestName" type="text" placeholder="Имя и фамилия" autocomplete="name" style="max-width:380px;text-align:center">
+        <button class="btn btn-primary btn-lg" id="guestGo" style="margin-top:12px">Начать тест</button>
+        <div class="form-err" id="guestErr"></div>
+      </div>`;
+    const inp = $("#guestName");
+    const go = async () => {
+      const name = inp.value.trim();
+      if (!name) { $("#guestErr").textContent = "Введите имя"; return; }
+      go.disabled = true; go.textContent = "Сохраняем… ⏳";
+      try {
+        const r = await fetch("/api/test/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ t: token, name }) });
+        const d = await r.json();
+        if (!d.ok) throw new Error(d.error || "Не сохранилось");
+        T.name = name; T.student = name; T.needName = false;
+        $("#tName").textContent = name; $("#tName").classList.remove("hidden");
+        headerMeta();
+        if (T.status === "finished") return renderFinish(true);
+        cur = firstUnanswered();
+        if (cur >= T.count) return finish();
+        renderQuestion();
+      } catch (e) { $("#guestErr").textContent = e.message; go.disabled = false; go.textContent = "Начать тест"; }
+    };
+    go.onclick = go;
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+    inp.focus();
   }
   function firstUnanswered() {
     for (let i = 0; i < (T ? T.count : 0); i++) if (!answered[i]) return i;
@@ -232,15 +265,15 @@
       res = `<div style="font-size:44px">📨</div><p>Ответы отправлены преподавателю.<br>Результат вы узнаете на занятии или в кабинете.</p>`;
     }
     const retryBtn = T.canRetry
-      ? `<button class="btn btn-primary" id="btnRetry">🔁 Ещё попытка (${T.attempts} из ${T.maxAttempts})</button>`
+      ? `<div style="margin:26px 0 14px;display:flex;justify-content:center"><button class="btn btn-primary" id="btnRetry">🔁 Ещё попытка (${T.attempts} из ${T.maxAttempts})</button></div>`
       : "";
     $("#quiz").innerHTML = `
       <div class="panel-center">
         <h2>Тест пройден ${already ? "" : "🏁"}</h2>
         ${res}
         ${retryBtn}
-        <div class="hero-btns" style="justify-content:center">
-          <a class="btn ${retryBtn ? "btn-ghost" : "btn-primary"}" href="/cabinet.html">← В кабинет ученика</a>
+        <div class="hero-btns" style="justify-content:center;margin-top:${retryBtn ? "10px" : "26px"};gap:14px">
+          <a class="btn ${retryBtn ? "btn-ghost" : "btn-primary"}" href="/cabinet.html#/tests">← К тестам</a>
           <a class="btn btn-ghost" href="/">На главную</a>
         </div>
       </div>`;

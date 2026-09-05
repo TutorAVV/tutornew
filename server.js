@@ -442,7 +442,10 @@ app.post("/api/book", async (req, res) => {
     if (APPS_SCRIPT_URL) {
       const data = await appsScript("book",
         { date, time, subject, name, email, phone, grade, comment, contact, chatId: cid, source }, "POST");
-      if (data && data.ok) { touchStudent({ phone, name, grade, subject, chatId: cid }).catch(() => {}); if (cid) tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`); }
+      if (data && data.ok) {
+        touchStudent({ phone, name, grade, subject, chatId: cid }).catch(() => {});
+        try { if (cid) await tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`); } catch (e) { console.error("book tg:", e.message); }
+      }
       return res.status(data && data.ok ? 200 : 409).json(data);
     }
     const db = loadDb();
@@ -460,8 +463,10 @@ app.post("/api/book", async (req, res) => {
     });
     saveDb(db);
     touchStudent({ phone, name, grade, subject, chatId: cid }).catch(() => {});
-    notifyAdmin(`🆕 Новая заявка\n📚 ${subject}\n📅 ${toDsp(date)} в ${time}\n👤 ${name}\n📞 ${phone}${email ? `\n✉️ ${email}` : ""}${grade ? `\n🎓 ${grade}` : ""}\nИсточник: ${source}`);
-    if (cid) tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    try {
+      notifyAdmin(`🆕 Новая заявка\n📚 ${subject}\n📅 ${toDsp(date)} в ${time}\n👤 ${name}\n📞 ${phone}${email ? `\n✉️ ${email}` : ""}${grade ? `\n🎓 ${grade}` : ""}\nИсточник: ${source}`);
+      if (cid) await tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    } catch (e) { console.error("book notify:", e.message); }
     res.json({ ok: true, bookingId: id });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "Не получилось записать, попробуйте ещё раз" }); }
 });
@@ -533,10 +538,13 @@ app.post("/api/reschedule", async (req, res) => {
       b.date = date; b.time = time; if (b.status !== "confirmed") b.status = "new";
       chatId = b.chatId || "";
       saveDb(db);
-      notifyAdmin(`🔁 Ученик перенёс занятие\n👤 ${b.name} 📞 ${b.phone}\n📅 Было: ${toDsp(bk.iso)} в ${bk.time}\n📅 Стало: ${toDsp(date)} в ${time}`);
+      try { notifyAdmin(`🔁 Ученик перенёс занятие\n👤 ${b.name} 📞 ${b.phone}\n📅 Было: ${toDsp(bk.iso)} в ${bk.time}\n📅 Стало: ${toDsp(date)} в ${time}`); } catch (e) { console.error("reschedule notify:", e.message); }
     }
-    if (!chatId) { try { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, phone)); if (u) chatId = String(u.chat_id); } catch (e) {} }
-    if (chatId) tgSend(chatId, `🔁 Занятие перенесено: ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    // Перенос уже выполнен — уведомления и поиск чата не должны превращать успех в ошибку.
+    try {
+      if (!chatId) { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, phone)); if (u) chatId = String(u.chat_id); }
+      if (chatId) await tgSend(chatId, `🔁 Занятие перенесено: ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    } catch (e) { console.error("reschedule notify2:", e.message); }
     res.json({ ok: true, date, time });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "Не получилось перенести, попробуйте ещё раз" }); }
 });
@@ -560,9 +568,10 @@ async function cabinetLessons(phone) {
   const [all, active] = await Promise.all([allBookings(), activeBookings(phone)]);
   const map = new Map();
   const norm = (b) => ({ id: b.id, iso: b.iso || toIso(b.date) || "", dsp: toDsp(b.iso || toIso(b.date)), time: b.time, subject: b.subject || "", status: b.status || "new" });
-  for (const b of all) { if (!b.id) continue; map.set(String(b.id), norm(b)); }
+  // Только занятия этого ученика — чужие записи в кабинет не попадают.
+  for (const b of all) { if (!b.id || !samePhone(b.phone, phone)) continue; map.set(String(b.id), norm(b)); }
   for (const b of active) {
-    if (!b.id) continue;
+    if (!b.id || !samePhone(b.phone, phone)) continue;
     const e = map.get(String(b.id));
     if (e) { if (!e.time) e.time = b.time; if (!e.subject) e.subject = b.subject || ""; if (e.iso !== b.iso) { e.iso = b.iso; e.dsp = b.dsp; } }
     else map.set(String(b.id), norm(b));
@@ -1315,6 +1324,18 @@ function parseTestRaw(raw) {
 function parseAssignAnswers(a) {
   try { return JSON.parse(a && a.answers ? a.answers : "{}") || {}; } catch (e) { return {}; }
 }
+function parseAssignHistory(a) {
+  try { const h = JSON.parse((a && a.history) || "[]"); return Array.isArray(h) ? h : []; }
+  catch (e) { return []; }
+}
+function makeAttemptDetail(questions, answers) {
+  return questions.map((q, i) => {
+    const given = answers[i] ? answers[i].a : null;
+    const givenText = q.type === "input" ? (given == null ? "" : String(given))
+      : (Array.isArray(given) ? given : (given == null ? [] : [given])).map((x) => q.options[x] || ("#" + (+x + 1))).join(", ");
+    return { i, text: q.text, given: givenText || "—", ok: !!answers[i] && !!answers[i].ok };
+  });
+}
 function isCorrectAnswer(q, given) {
   if (!q) return false;
   if (q.type === "input") return normAnsText(given) === normAnsText(q.answer);
@@ -1339,6 +1360,7 @@ app.post("/api/admin/tests", needAdmin, async (req, res) => {
       count: questions.length,
       feedback: b.feedback === false ? "0" : "1", showScore: b.showScore === false ? "0" : "1",
       noCopy: b.noCopy ? "1" : "0", maxAttempts: String(clampInt(b.maxAttempts, 1, 10)),
+      optionsCount: String(clampInt(b.optionsCount, 2, 8)),
       created: new Date().toISOString(),
     };
     await tbl.append("Tests", row);
@@ -1352,7 +1374,7 @@ app.get("/api/admin/tests", needAdmin, async (req, res) => {
     const out = tests.map((t) => ({
       id: t.id, title: t.title, count: +t.count || 0,
       feedback: flagOn(t.feedback), showScore: flagOn(t.showScore), noCopy: flagOn(t.noCopy),
-      maxAttempts: clampInt(t.maxAttempts, 1, 10),
+      maxAttempts: clampInt(t.maxAttempts, 1, 10), optionsCount: clampInt(t.optionsCount || 4, 2, 8),
       created: t.created,
       assigned: assigns.filter((a) => String(a.testId) === String(t.id)).length,
       finished: assigns.filter((a) => String(a.testId) === String(t.id) && a.status === "finished").length,
@@ -1379,6 +1401,7 @@ app.put("/api/admin/tests/:id", needAdmin, async (req, res) => {
     if (b.showScore !== undefined) patch.showScore = b.showScore ? "1" : "0";
     if (b.noCopy !== undefined) patch.noCopy = b.noCopy ? "1" : "0";
     if (b.maxAttempts !== undefined) patch.maxAttempts = String(clampInt(b.maxAttempts, 1, 10));
+    if (b.optionsCount !== undefined) patch.optionsCount = String(clampInt(b.optionsCount, 2, 8));
     await tbl.update("Tests", "id", t.id, patch);
     res.json({ ok: true });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "save failed" }); }
@@ -1395,24 +1418,29 @@ app.delete("/api/admin/tests/:id", needAdmin, async (req, res) => {
 app.post("/api/admin/tests/assign", needAdmin, async (req, res) => {
   const b = req.body || {};
   const testId = String(b.testId || "");
-  if (digits(b.phone).length < 10 || !testId) return res.status(400).json({ ok: false, error: "Нужны тест и телефон ученика" });
+  const guest = !!b.guest;
+  if (!testId || (!guest && digits(b.phone).length < 10)) return res.status(400).json({ ok: false, error: "Нужны тест и телефон ученика (или выберите «Пустой ученик»)" });
   try {
     const tests = await tbl.list("Tests");
     const t = tests.find((x) => String(x.id) === testId);
     if (!t) return res.status(404).json({ ok: false, error: "Тест не найден" });
-    const students = await tbl.list("Students");
-    const st = students.find((x) => samePhone(x.phone, b.phone));
+    let st = null, phone = "";
+    if (!guest) {
+      const students = await tbl.list("Students");
+      st = students.find((x) => samePhone(x.phone, b.phone));
+      phone = String(b.phone);
+    }
     const id = newId("Q");
     const maxAttempts = clampInt(t.maxAttempts, 1, 10);
     const row = {
-      id, testId, title: t.title, phone: String(b.phone), name: (st && st.name) || b.name || "",
-      status: "assigned", answers: "", score: "", total: t.count || "0",
+      id, testId, title: t.title, phone: guest ? "guest-" + id : phone, name: guest ? "" : ((st && st.name) || b.name || ""),
+      status: "assigned", answers: "", score: "", total: t.count || "0", guest: guest ? "1" : "0",
       visible: b.sendCab === false ? "0" : "1", attempts: "0",
       createdAt: new Date().toISOString(), startedAt: "", finishedAt: "",
     };
     await tbl.append("TestAssign", row);
     let tg = "";
-    if (b.sendTg !== false) {
+    if (!guest && b.sendTg !== false) {
       let chatId = (st && st.chat_id) || "";
       if (!chatId) { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, b.phone)); if (u) chatId = String(u.chat_id); }
       if (chatId) {
@@ -1440,22 +1468,22 @@ app.get("/api/admin/tests/results", needAdmin, async (req, res) => {
       .sort((a, b) => String(a.createdAt) < String(b.createdAt) ? 1 : -1)
       .map((a) => {
         const answers = parseAssignAnswers(a);
-        const detail = questions.map((q, i) => {
-          const given = answers[i] ? answers[i].a : null;
-          const givenText = q.type === "input" ? (given == null ? "" : String(given))
-            : (Array.isArray(given) ? given : (given == null ? [] : [given])).map((x) => q.options[x] || ("#" + (+x + 1))).join(", ");
-          return { i, text: q.text, given: givenText || "—", ok: !!answers[i] && !!answers[i].ok };
-        });
+        const detail = makeAttemptDetail(questions, answers);
+        const history = parseAssignHistory(a).map((h) => ({
+          n: h.n || 0, score: h.score, total: h.total, finishedAt: h.finishedAt || "",
+          detail: makeAttemptDetail(questions, h.answers || {}),
+        }));
         return {
-          id: a.id, name: a.name, phone: a.phone, status: a.status || "assigned",
+          id: a.id, name: a.name, phone: a.phone, guest: String((a.guest) || "") === "1", status: a.status || "assigned",
+          link: `/test.html?t=${encodeURIComponent(a.id)}`,
           score: a.score === "" || a.score == null ? null : +a.score, total: +a.total || questions.length,
           createdAt: a.createdAt, startedAt: a.startedAt || "", finishedAt: a.finishedAt || "", visible: flagOn(a.visible),
           attempts: Math.max(0, +a.attempts || 0),
-          answered: Object.keys(answers).length, detail,
+          answered: Object.keys(answers).length, detail, history,
         };
       });
     res.json({ ok: true, test: { id: t.id, title: t.title, feedback: flagOn(t.feedback), showScore: flagOn(t.showScore),
-      noCopy: flagOn(t.noCopy), maxAttempts: clampInt(t.maxAttempts, 1, 10) }, assignments: rows });
+      noCopy: flagOn(t.noCopy), maxAttempts: clampInt(t.maxAttempts, 1, 10), optionsCount: clampInt(t.optionsCount || 4, 2, 8) }, assignments: rows });
   } catch (e) { res.status(500).json({ ok: false, error: "results failed" }); }
 });
 
@@ -1470,7 +1498,7 @@ app.get("/api/admin/tests/:id", needAdmin, async (req, res) => {
     res.json({ ok: true, test: {
       id: t.id, title: t.title, questions, count: questions.length,
       feedback: flagOn(t.feedback), showScore: flagOn(t.showScore), noCopy: flagOn(t.noCopy),
-      maxAttempts: clampInt(t.maxAttempts, 1, 10), created: t.created,
+      maxAttempts: clampInt(t.maxAttempts, 1, 10), optionsCount: clampInt(t.optionsCount || 4, 2, 8), created: t.created,
     } });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "test not loaded" }); }
 });
@@ -1502,8 +1530,10 @@ function testView(a, tst) {
   const attempts = Math.max(0, +a.attempts || 0);
   const answeredMap = {};
   for (const k of Object.keys(answers)) answeredMap[k] = feedback ? { ok: !!answers[k].ok } : {};
+  const guest = String((a && a.guest) || "") === "1";
   return {
     ok: true, title: tst.title, student: a.name || "", count: questions.length,
+    guest, needName: guest && !String((a && a.name) || "").trim(),
     feedback, showScore, noCopy: flagOn(tst && tst.noCopy),
     maxAttempts, attempts, canRetry: finished && attempts < maxAttempts,
     status: finished ? "finished" : (Object.keys(answers).length ? "started" : "assigned"),
@@ -1590,6 +1620,22 @@ app.post("/api/test/answer", async (req, res) => {
     res.json(out);
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "answer failed" }); }
 });
+/** «Пустой ученик»: вводит своё ФИО по ссылке; оно сохраняется только в этой попытке.
+ *  В общий список учеников сайта не добавляется. */
+app.post("/api/test/name", async (req, res) => {
+  const t = String((req.body || {}).t || "");
+  const name = String((req.body || {}).name || "").trim().slice(0, 200);
+  if (!name) return res.status(400).json({ ok: false, error: "Введите имя" });
+  try {
+    const assigns = await tbl.list("TestAssign");
+    const a = assigns.find((x) => String(x.id) === t);
+    if (!a || !flagOn(a.visible)) return res.status(404).json({ ok: false, error: "Тест не найден" });
+    if (String(a.guest || "") !== "1") return res.status(400).json({ ok: false, error: "Этот тест привязан к ученику" });
+    await tbl.update("TestAssign", "id", t, { name });
+    res.json({ ok: true, name });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "save name failed" }); }
+});
+
 app.post("/api/test/finish", async (req, res) => {
   const t = String((req.body || {}).t || "");
   try {
@@ -1630,11 +1676,18 @@ app.post("/api/test/retry", async (req, res) => {
     const tests = await tbl.list("Tests");
     const tst = tests.find((x) => String(x.id) === String(a.testId));
     if (!tst) return res.status(404).json({ ok: false, error: "Тест удалён" });
+    let questions = [];
+    try { questions = JSON.parse((tst && tst.questions) || "[]"); } catch (e) {}
     const maxAttempts = clampInt(tst.maxAttempts, 1, 10);
     const attempts = Math.max(0, +a.attempts || 0);
     if (a.status !== "finished" || attempts >= maxAttempts)
       return res.status(409).json({ ok: false, error: "Повторное прохождение недоступно" });
-    await tbl.update("TestAssign", "id", t, { answers: "", status: "assigned", score: "", startedAt: "" });
+    const history = parseAssignHistory(a);
+    history.push({
+      n: attempts, score: +a.score || 0, total: +a.total || questions.length || 0,
+      finishedAt: a.finishedAt || new Date().toISOString(), answers: parseAssignAnswers(a),
+    });
+    await tbl.update("TestAssign", "id", t, { answers: "", status: "assigned", score: "", startedAt: "", history: JSON.stringify(history) });
     res.json(testView({ ...a, answers: "", status: "assigned", score: "" }, tst));
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "retry failed" }); }
 });

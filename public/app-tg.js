@@ -66,22 +66,39 @@
 
   function buildDates() {
     state.dates = [];
-    for (let i = 0; i < 14; i++) {
+    const p = (n) => String(n).padStart(2, "0");
+    for (let i = 0; i < 45; i++) {
       const d = new Date(); d.setDate(d.getDate() + i);
-      state.dates.push(d.toISOString().slice(0, 10));
+      state.dates.push(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
     }
     state.date = state.dates[0];
-    $("#dateStrip").innerHTML = state.dates.map((ds, i) => {
+    let html = "", prevMonth = null;
+    state.dates.forEach((ds, i) => {
       const f = fmtDate(ds);
-      return `<button class="date-btn${i === 0 ? " active" : ""}" data-d="${ds}">
+      const dm = new Date(ds + "T00:00:00").getMonth();
+      if (prevMonth !== null && dm !== prevMonth) html += `<div class="date-sep" aria-hidden="true"></div>`;
+      prevMonth = dm;
+      html += `<button class="date-btn${i === 0 ? " active" : ""}" data-d="${ds}">
         <span class="dw">${i === 0 ? "сег" : i === 1 ? "зав" : f.wd}</span>
         <span class="dn">${f.dn}</span><span class="dm">${f.mn}</span></button>`;
-    }).join("");
+    });
+    $("#dateStrip").innerHTML = html;
     $$("#dateStrip .date-btn").forEach((b) => b.onclick = () => {
       state.date = b.dataset.d; state.time = "";
       $$("#dateStrip .date-btn").forEach((x) => x.classList.toggle("active", x === b));
       loadSlots();
     });
+    enableDateDragScroll();
+  }
+  function enableDateDragScroll() {
+    const el = $("#dateStrip");
+    if (!el || el.dataset.drag) return;
+    el.dataset.drag = "1";
+    let down = false, startX = 0, startScroll = 0, moved = false;
+    el.addEventListener("mousedown", (e) => { down = true; moved = false; startX = e.clientX; startScroll = el.scrollLeft; e.preventDefault(); });
+    window.addEventListener("mousemove", (e) => { if (!down) return; const dx = e.clientX - startX; if (Math.abs(dx) > 3) moved = true; el.scrollLeft = startScroll - dx; });
+    window.addEventListener("mouseup", () => { down = false; setTimeout(() => { moved = false; }, 0); });
+    el.addEventListener("click", (e) => { if (moved) { e.preventDefault(); e.stopPropagation(); } }, true);
   }
 
   // ---------- slots ----------
