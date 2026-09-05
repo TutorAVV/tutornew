@@ -39,6 +39,7 @@
       <button class="tab" data-tab="bookings">📋 Заявки</button>
       <button class="tab" data-tab="slots">➕ Слоты</button>
       <button class="tab" data-tab="students">🎓 Ученики</button>
+      <button class="tab" data-tab="tests">📝 Тесты</button>
       <button class="tab" data-tab="tg">✈️ Telegram <span class="pill p-new hidden" id="tgUnread"></span></button>
       <button class="tab" data-tab="settings">⚙️ Настройки</button>
       <button class="tab" data-tab="help">❓ Помощь</button>
@@ -134,6 +135,46 @@
       </div>
     </div>
 
+    <!-- TESTS -->
+    <div class="panel hidden" id="tab-tests">
+      <div class="split">
+        <div class="split-list" style="max-height:none">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="mini-btn" id="tstReload">🔄</button>
+            <button class="mini-btn" id="tstNew">＋ Создать тест</button>
+          </div>
+          <div id="tstList"><div class="muted">Загрузка…</div></div>
+        </div>
+        <div class="split-detail" id="tstDetail">
+          <div class="muted">
+            <h3 style="margin-top:0">📝 Тесты для учеников</h3>
+            <p class="muted-sm">Вставьте готовый тест (из учебника, сайта или сгенерированный ИИ) — сайт сам разберёт вопросы, варианты и ответы и соберёт аккуратный тест. Каждому ученику отправляется своя одноразовая ссылка: пройти тест можно только один раз, а правильные ответы не видны до ответа.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- отправка теста ученику -->
+      <div class="modal hidden" id="tstSendModal">
+        <div class="modal-card">
+          <h3>📤 Отправить тест: <span id="tstSendTitle"></span></h3>
+          <label style="font-weight:700;font-size:14px;display:block;margin-top:10px">Ученик
+            <select id="tstSendStudent" style="width:100%;margin-top:6px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:inherit"></select>
+          </label>
+          <p class="muted-sm" id="tstSendNoStudents" style="display:none">Учеников пока нет — сначала нужна хотя бы одна запись.</p>
+          <div class="toolbar" style="margin-top:12px">
+            <label class="chk"><input type="checkbox" id="tstSendCab" checked> в кабинет</label>
+            <label class="chk" id="tstSendTgWrap"><input type="checkbox" id="tstSendTg" checked> в Telegram</label>
+          </div>
+          <p class="muted-sm">У каждого ученика — своя ссылка и одна попытка. Ученик увидит тест в кабинете и/или получит сообщение от бота.</p>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="tstSendCancel">Отмена</button>
+            <button class="btn btn-primary btn-sm" id="tstSendGo">Отправить</button>
+          </div>
+          <div class="form-err" id="tstSendErr"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- TELEGRAM -->
     <div class="panel hidden" id="tab-tg">
       <div id="tgStatus" class="muted-sm" style="margin-bottom:12px">Проверяем бота…</div>
@@ -190,7 +231,19 @@
     <div class="panel hidden" id="tab-help">
       <h3>Где лежат данные</h3>
       <p id="storageText" class="muted"></p>
-      <p class="muted-sm">Листы таблицы: <span class="kbd">Slots</span> (слоты), <span class="kbd">Bookings</span> (заявки), <span class="kbd">Settings</span> (настройки сайта), <span class="kbd">Users</span> (пользователи бота), <span class="kbd">Messages</span> (переписка/рассылки), <span class="kbd">Students</span> (карточки учеников), <span class="kbd">Notes</span> (домашки/сообщения в кабинет). Все листы создаются автоматически. Колонка <span class="kbd">format</span> в Bookings не используется — её можно удалить.</p>
+      <p class="muted-sm">Листы таблицы: <span class="kbd">Slots</span> (слоты), <span class="kbd">Bookings</span> (заявки), <span class="kbd">Settings</span> (настройки сайта), <span class="kbd">Users</span> (пользователи бота), <span class="kbd">Messages</span> (переписка/рассылки), <span class="kbd">Students</span> (карточки учеников), <span class="kbd">Notes</span> (домашки/сообщения в кабинет), <span class="kbd">Tests</span> + <span class="kbd">TestAssign</span> (тесты и попытки учеников — отдельные листы, основную БД не засоряют). Все листы создаются автоматически. Колонка <span class="kbd">format</span> в Bookings не используется — её можно удалить.</p>
+
+      <h3>📝 Тесты: как готовить</h3>
+      <ol class="side-list">
+        <li>Попросите ИИ: «Составь тест по теме …, 10 вопросов, по 4 варианта (а–г), укажи ответы в конце» — или скопируйте готовый тест из учебника/сайта.</li>
+        <li>Вкладка <b>Тесты</b> → «Создать тест» → вставьте текст → «Разобрать». Понимаются форматы: «1. Вопрос / а) вариант / Ответ: б», ключ в конце («Ответы: 1-б, 2-а»), вопросы с открытым ответом («Ответ: 3,14») и JSON.</li>
+        <li>Проверьте предпросмотр (правильные варианты отмечены зелёным) и сохраните. При создании можно включить/выключить: показ ученику правильности после каждого ответа и итогового балла.</li>
+        <li>«Отправить ученику» — создаст персональную одноразовую ссылку <span class="kbd">/test.html?t=…</span>: тест появится в кабинете и/или придёт от бота в Telegram. Пройти можно один раз, ответы не подглядываются.</li>
+        <li>Результаты — кнопка «Результаты» у теста: кто начал/закончил, балл и ответ на каждый вопрос. Когда ученик завершает тест, вам приходит уведомление в Telegram.</li>
+      </ol>
+
+      <h3>✏️ Как поправить ФИО ученика</h3>
+      <p class="muted-sm">Вкладка <b>Ученики</b> → карточка → поле «ФИО ученика» → «Сохранить». Новое имя автоматически подставится в заявки и расписание — в таблицу лазить не нужно.</p>
 
       <h3>⚠️ Ошибка «You can't set the number format of cells in a typed column»</h3>
       <p class="muted-sm">В таблице у колонки <span class="kbd">date</span> или <span class="kbd">time</span> включён «тип колонки» (Sheets → таблица/типизированная колонка). Код v3 это обходит автоматически — просто обновите <span class="kbd">Code.gs</span> и сделайте <b>Новую версию</b> развертывания. Если хотите убрать причину: выделите колонки date/time → Формат → Число → Обычный текст, либо преобразуйте «таблицу» обратно в диапазон.</p>

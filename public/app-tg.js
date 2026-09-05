@@ -96,7 +96,7 @@
   async function loadSlots() {
     const grid = $("#slotsGrid"), hint = $("#slotsHint");
     grid.innerHTML = `<div class="spin">Загружаем свободное время… ⏳</div>`;
-    hint.textContent = "· " + fmtLong(state.date);
+    hint.textContent = `${fmtLong(state.date)} · время по ${state.tzLabel}`;
     try {
       const r = await fetch(`/api/slots?date=${state.date}&subject=${encodeURIComponent(state.subject || "")}`);
       const data = await r.json();
@@ -107,9 +107,8 @@
     } else {
       grid.innerHTML = state.slots.map((s) => {
         const free = isFree(s.status);
-        const dur = s.duration ? `<small> · ${s.duration} мин</small>` : "";
         return `<button class="slot" data-t="${s.time}" ${free ? "" : "disabled"}>
-          <b>${s.time}</b><small>${free ? "💻 " + state.tzLabel : slotLabel(s.status)}${free ? dur : ""}</small></button>`;
+          <b>${s.time}</b>${free ? "" : `<small>${slotLabel(s.status)}</small>`}</button>`;
       }).join("");
       $$("#slotsGrid .slot").forEach((b) => b.onclick = () => {
         if (b.disabled) return;
@@ -269,8 +268,7 @@
       s.classList.remove("hidden");
       $("#successTitle").textContent = "Вы записаны!";
       $("#successText").textContent =
-        `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}).`;
-      try { localStorage.setItem("myPhone", phone); } catch (e) {}
+        `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}).\nПодтверждение придёт на ${phone}.`;      try { localStorage.setItem("myPhone", phone); } catch (e) {}
       if (tg) { try { tg.MainButton.hide(); tg.showAlert("Вы записаны! 🎉"); } catch (e) {} }
       s.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) {
@@ -288,7 +286,7 @@
       const r = await fetch("/api/config");
       const cfg = await r.json();
       if (cfg.subjects && cfg.subjects.length) state.subjects = cfg.subjects;
-      if (cfg.tzLabel) { state.tzLabel = cfg.tzLabel; $("#tzLabel").textContent = cfg.tzLabel; }
+      if (cfg.tzLabel) state.tzLabel = cfg.tzLabel;
       if (cfg.rescheduleHours) state.rescheduleHours = cfg.rescheduleHours;
       if (cfg.tutorTg) state.tutorTg = cfg.tutorTg;
       if (cfg.grades && cfg.grades.length) {

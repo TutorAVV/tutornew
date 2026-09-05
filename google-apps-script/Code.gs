@@ -364,6 +364,35 @@ function rescheduleBooking_(p) {
   return { ok: false, error: "Запись не найдена" };
 }
 
+/** Переименовать ученика (ФИО) во всех слотах и заявках — из админки, без правки таблицы */
+function renameStudent_(p) {
+  var name = String(p.name || "").trim().slice(0, 120);
+  if (!name) return { ok: false, error: "bad name" };
+  var n = 0;
+  var sh = sheetByName_(SLOTS_SHEET_NAME, NEW_SLOT_HEADERS);
+  var cm0 = colMap_(sh); ensureCol_(sh, cm0, "student");
+  var cm = cm0.map;
+  if ("phone" in cm) {
+    rows_(sh).forEach(function (r, i) {
+      if (samePhone_(r[cm.phone], p.phone) && String(r[cm.student] || "")) {
+        sh.getRange(i + 2, cm.student + 1).setValue(name); n++;
+      }
+    });
+  }
+  var bh = sheetByName_(BOOKINGS_SHEET_NAME, NEW_BOOK_HEADERS);
+  var bm0 = colMap_(bh);
+  var bm = bm0.map;
+  var nameCol = ("student" in bm) ? bm.student : ensureCol_(bh, bm0, "name");
+  if ("phone" in bm) {
+    rows_(bh).forEach(function (r, i) {
+      if (samePhone_(r[bm.phone], p.phone)) {
+        bh.getRange(i + 2, nameCol + 1).setValue(name); n++;
+      }
+    });
+  }
+  return { ok: true, renamed: n };
+}
+
 /** Привязать chat_id к ученику по телефону (после «Поделиться номером» в боте) — для напоминаний */
 function linkChat_(p) {
   var n = 0;
@@ -828,6 +857,7 @@ function route_(p) {
   if (a === "cancelBooking") return cancelBooking_(p);
   if (a === "rescheduleBooking") return rescheduleBooking_(p);
   if (a === "linkChat") return linkChat_(p);
+  if (a === "renameStudent") return renameStudent_(p);
   if (a === "tblList") return tblList_(p);
   if (a === "tblAppend") return tblAppend_(p);
   if (a === "tblUpdate") return tblUpdate_(p);
