@@ -321,7 +321,10 @@ body.tg{
 /* Telegram специфичные мелочи */
 body.tg .header{display:none}
 body.tg .footer{display:none}
-body.tg main{padding:8px 0!important}
+body.tg main{
+  padding-top: calc(8px + var(--tg-top-inset, env(safe-area-inset-top, 0px)))!important;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px))!important;
+}
 body.tg .book-main{box-shadow:none;border-color:var(--line)}
 
 /* ========== v3: перенос, админка (дни, ученики, telegram, настройки), кабинет ========== */
@@ -340,6 +343,20 @@ body.dark .resched-banner{background:#3a2a12;border-color:#92400e;color:var(--in
 .rowbtns .mini-btn{white-space:nowrap}
 .rowbtns.col{flex-direction:column;align-items:stretch}
 .rowbtns.col .mini-btn{text-align:left;white-space:nowrap}
+
+/* Колонка «Действие» — всегда на одном месте у правого края карточки дня.
+   Ширина фиксирована, кнопки прижаты вправо, при горизонтальной прокрутке
+   колонка «прилипает» к правому краю. */
+.tbl-day .col-act{
+  width:186px;min-width:186px;max-width:186px;
+  position:sticky;right:0;z-index:2;
+  background:var(--card);
+  box-shadow:-8px 0 8px -8px rgba(10,14,30,.18);
+  padding-right:14px;
+}
+.tbl-day td.col-act .rowbtns{justify-content:flex-end}
+.tbl-day th.col-act{text-align:right}
+body.dark .tbl-day .col-act{background:var(--card)}
 
 /* админка: компактный календарь расписания */
 .admin-cal{border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:20px;background:var(--bg)}
@@ -388,7 +405,9 @@ body.dark .msg.in{background:#1a2140;color:var(--ink)}
 .chat-send textarea{flex:1;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px;font-family:inherit;resize:vertical}
 body.dark .chat-send textarea{background:#10173a;color:var(--ink)}
 .modal{position:fixed;inset:0;background:rgba(10,14,30,.55);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
-.modal-card{background:var(--card);border-radius:18px;padding:22px;max-width:520px;width:100%;box-shadow:var(--shadow);color:var(--ink)}
+.modal-card{background:var(--card);border-radius:18px;padding:22px;max-width:520px;width:100%;box-shadow:var(--shadow);color:var(--ink);max-height:90vh;overflow:auto}
+.modal-card-wide{max-width:940px}
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .modal-card textarea,.modal-card input{width:100%;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px;font-family:inherit}
 body.dark .modal-card textarea,body.dark .modal-card input{background:#10173a;color:var(--ink)}
 .btn-primary:disabled{opacity:.5;cursor:not-allowed}

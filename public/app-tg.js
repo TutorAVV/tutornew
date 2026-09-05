@@ -5,11 +5,53 @@
   const $$ = (s) => Array.from(document.querySelectorAll(s));
 
   const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+
+  /**
+   * Отступ сверху под шапку Telegram.
+   * Когда приложение открывают из СПИСКА ЧАТОВ, Telegram рисует свою панель
+   * поверх контента (safe area сверху), и сайт «обрезается». Берём реальные
+   * значения из WebApp API и кладём их в CSS-переменную --tg-top-inset.
+   */
+  function applyTgInsets() {
+    if (!tg) return;
+    try {
+      const content = tg.contentSafeAreaInset || {};
+      const safe = tg.safeAreaInset || {};
+      let top = Math.max(+content.top || 0, +safe.top || 0);
+      // Некоторые клиенты не отдают инсеты — подстрахуемся минимальным отступом.
+      if (!top) top = 10;
+      document.documentElement.style.setProperty("--tg-top-inset", top + "px");
+    } catch (e) {}
+  }
+
+  /** Закрывать без вопроса «данные не сохранятся», когда сохранять уже нечего. */
+  let closingConfirmOn = false;
+  function setClosingConfirm(on) {
+    if (!tg) return;
+    try {
+      if (on && !closingConfirmOn && tg.enableClosingConfirmation) { tg.enableClosingConfirmation(); closingConfirmOn = true; }
+      if (!on && closingConfirmOn && tg.disableClosingConfirmation) { tg.disableClosingConfirmation(); closingConfirmOn = false; }
+    } catch (e) {}
+  }
+  /** Подтверждение нужно, только если ученик уже начал заполнять форму. */
+  function refreshClosingConfirm() {
+    if (!tg) return;
+    const done = $("#bookSuccess") && !$("#bookSuccess").classList.contains("hidden");
+    if (done) { setClosingConfirm(false); return; }
+    const dirty = ["#fName", "#fEmail", "#fPhone", "#fComment"].some((sel) => {
+      const el = $(sel); return el && String(el.value || "").trim();
+    }) || !!state.time;
+    setClosingConfirm(dirty);
+  }
+
   if (tg) {
     try {
       tg.ready();
       tg.expand();
-      tg.enableClosingConfirmation && tg.enableClosingConfirmation();
+      applyTgInsets();
+      ["safeAreaChanged", "contentSafeAreaChanged", "viewportChanged", "fullscreenChanged"].forEach(function (ev) {
+        try { tg.onEvent && tg.onEvent(ev, applyTgInsets); } catch (e) {}
+      });
       // Apply Telegram theme
       document.body.classList.add("tg");
       if (tg.colorScheme === "dark") {
@@ -133,6 +175,7 @@
         $$("#slotsGrid .slot").forEach((x) => x.classList.toggle("selected", x === b));
         try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {}
         updateSummary();
+        refreshClosingConfirm();
       });
     }
     updateSummary();
@@ -203,6 +246,7 @@
       const s = $("#bookSuccess");
       s.classList.remove("hidden");
       $("#successTitle").textContent = "Занятие перенесено!";
+      setClosingConfirm(false);
       $("#successText").textContent = `${subj}, ${fmtLong(newDate)} в ${newTime} (${state.tzLabel}).`;
       if (tg) { try { tg.MainButton.hide(); } catch (e) {} }
       $("#myPhone").value = rs.phone; myFind();
@@ -284,6 +328,7 @@
       const s = $("#bookSuccess");
       s.classList.remove("hidden");
       $("#successTitle").textContent = "Вы записаны!";
+      setClosingConfirm(false);
       $("#successText").textContent =
         `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}).\nПодтверждение придёт на ${phone}.`;      try { localStorage.setItem("myPhone", phone); } catch (e) {}
       if (tg) { try { tg.MainButton.hide(); tg.showAlert("Вы записаны! 🎉"); } catch (e) {} }
@@ -332,7 +377,13 @@
       $("#bookSuccess").classList.add("hidden");
       $("#formStep").classList.remove("hidden");
       state.time = ""; loadSlots();
+      refreshClosingConfirm();
     };
+    ["#fName", "#fEmail", "#fPhone", "#fComment"].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.addEventListener("input", refreshClosingConfirm);
+    });
+    refreshClosingConfirm();
     $("#reschedCancel").onclick = exitResched;
     $("#myFind").onclick = myFind;
     $("#myPhone").addEventListener("keydown", (e) => { if (e.key === "Enter") myFind(); });
