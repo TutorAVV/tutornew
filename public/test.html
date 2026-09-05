@@ -23,11 +23,17 @@
   </div>
 </header>
 
-<main class="section">
-  <div class="wrap">
-    <div class="quiz-card" id="quiz">
+<main class="section test-page">
+  <div class="wrap wrap-narrow">
+    <h1 class="test-title" id="tTitle">Тест</h1>
+    <div class="test-student hidden" id="tName"></div>
+    <div class="test-meta muted-sm" id="tMeta"></div>
+
+    <div class="quiz-card panel-lite" id="quiz">
       <div class="muted">Загрузка… ⏳</div>
     </div>
+
+    <div class="no-copy-hint muted-sm hidden" id="tNoCopyHint">🔒 Копирование вопросов и вариантов отключено преподавателем.</div>
   </div>
 </main>
 

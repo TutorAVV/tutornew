@@ -847,6 +847,138 @@ function createReminderTrigger() {
   ScriptApp.newTrigger("reminderTick").timeBased().everyMinutes(15).create();
 }
 
+// ---------- комплексные запросы теста (1 HTTP-ход вместо 2-3) ----------
+// Сервер в проде ходит сюда за тестом и за сохранением ответа одним запросом.
+// Логика совпадает с серверной: правильные ответы ученику не отдаются,
+// флаги читаем через String (в ячейке "0" может лежать числом 0).
+function flagOn_(v) { return String(v == null ? "" : v) !== "0"; }
+
+function rowObj_(head, vals) {
+  var o = {};
+  for (var i = 0; i < head.length; i++) { if (head[i]) o[head[i]] = tblCell_(vals[i]); }
+  return o;
+}
+
+/** Найти строку листа по значению колонки: {head, idx, vals} или null */
+function findRowBy_(sh, keyCol, val) {
+  if (sh.getLastRow() < 2) return null;
+  var head = tblHeaders_(sh);
+  var fi = head.indexOf(String(keyCol));
+  if (fi === -1) return null;
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, head.length).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (String(tblCell_(vals[i][fi])) === String(val)) return { head: head, idx: i, vals: vals };
+  }
+  return null;
+}
+
+function normAnsText_(s) {
+  return String(s == null ? "" : s).toLowerCase().replace(/,/g, ".").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+}
+
+function isCorrectAnswer_(q, given) {
+  if (!q) return false;
+  if (q.type === "input") return normAnsText_(given) === normAnsText_(q.answer);
+  var g = (Array.isArray(given) ? given : [given]).map(Number).filter(function (x) { return isFinite(x) && x === Math.floor(x); });
+  var c = q.correct || [];
+  if (g.length !== c.length) return false;
+  for (var i = 0; i < g.length; i++) {
+    var found = false;
+    for (var j = 0; j < c.length; j++) { if (c[j] === g[i]) { found = true; break; } }
+    if (!found) return false;
+  }
+  return true;
+}
+
+/** Аналог серверного testView: что видит ученик (без правильных ответов) */
+function testView_(a, tst) {
+  var questions = [];
+  try { questions = JSON.parse(String(tst.questions || "[]")); } catch (e) {}
+  var answers = {};
+  try { answers = JSON.parse(String(a.answers || "{}")); } catch (e) {}
+  var keys = Object.keys(answers);
+  var finished = String(a.status) === "finished";
+  var showScore = flagOn_(tst.showScore);
+  var feedback = flagOn_(tst.feedback);
+  var maxAttempts = Math.max(1, Math.min(10, +(tst.maxAttempts || 1) || 1));
+  var attempts = Math.max(0, +(a.attempts || 0) || 0);
+  var answeredMap = {};
+  for (var k in answers) { answeredMap[k] = feedback ? { ok: !!answers[k].ok } : {}; }
+  var outQ = [];
+  if (!finished) {
+    for (var i = 0; i < questions.length; i++) {
+      var q = questions[i];
+      outQ.push({ type: q.type, text: q.text, options: q.options || [], multi: !!q.multi });
+    }
+  }
+  return {
+    ok: true, title: String(tst.title || "Тест"), student: String(a.name || ""),
+    count: questions.length, feedback: feedback, showScore: showScore,
+    noCopy: flagOn_(tst.noCopy),
+    maxAttempts: maxAttempts, attempts: attempts, canRetry: finished && attempts < maxAttempts,
+    status: finished ? "finished" : (keys.length ? "started" : "assigned"),
+    answered: keys.length, answeredMap: answeredMap,
+    score: finished && showScore ? (+a.score || 0) : null,
+    questions: outQ
+  };
+}
+
+function findTestPair_(token) {
+  var ash = tblSheet_("TestAssign");
+  var af = findRowBy_(ash, "id", token);
+  if (!af) return { err: "Тест не найден. Попросите преподавателя прислать новую ссылку." };
+  var a = rowObj_(af.head, af.vals[af.idx]);
+  if (!flagOn_(a.visible)) return { err: "Тест не найден. Попросите преподавателя прислать новую ссылку." };
+  var tsh = tblSheet_("Tests");
+  var tf = findRowBy_(tsh, "id", a.testId);
+  if (!tf) return { err: "Тест удалён" };
+  return { a: a, tst: rowObj_(tf.head, tf.vals[tf.idx]) };
+}
+
+function testLoad_(p) {
+  var pair = findTestPair_(String(p.token || ""));
+  if (pair.err) return { ok: false, error: pair.err };
+  return testView_(pair.a, pair.tst);
+}
+
+function testAnswer_(p) {
+  var token = String(p.token || ""), qi = Number(p.qi);
+  var pair = findTestPair_(token);
+  if (pair.err) return { ok: false, error: pair.err };
+  var a = pair.a, tst = pair.tst;
+  if (String(a.status) === "finished") return { ok: false, error: "Тест уже пройден" };
+  var questions = [];
+  try { questions = JSON.parse(String(tst.questions || "[]")); } catch (e) {}
+  var q = questions[qi];
+  if (!q) return { ok: false, error: "Нет такого вопроса" };
+  var answers = {};
+  try { answers = JSON.parse(String(a.answers || "{}")); } catch (e) {}
+  if (answers[qi] != null) return { ok: false, error: "На этот вопрос уже есть ответ" };
+  var answ = p.answer;
+  if (q.type === "input") {
+    if (typeof answ !== "string" || !String(answ).replace(/^\s+|\s+$/g, "")) return { ok: false, error: "Введите ответ" };
+  } else {
+    var arr = Array.isArray(answ) ? answ.map(Number) : [Number(answ)];
+    if (!arr.length) return { ok: false, error: "Выберите ответ" };
+    var opts = q.options || [];
+    for (var i = 0; i < arr.length; i++) {
+      if (!isFinite(arr[i]) || arr[i] !== Math.floor(arr[i]) || arr[i] < 0 || arr[i] >= opts.length) {
+        return { ok: false, error: "Выберите ответ" };
+      }
+    }
+  }
+  var ok = isCorrectAnswer_(q, answ);
+  answers[qi] = { a: answ, ok: ok, ts: new Date().toISOString() };
+  var patch = { answers: JSON.stringify(answers), status: "started" };
+  if (String(a.status) !== "started") patch.startedAt = new Date().toISOString();
+  tblUpdate_({ table: "TestAssign", field: "id", value: token, patch: patch });
+  var feedback = flagOn_(tst.feedback);
+  var out = { ok: true, answeredCount: Object.keys(answers).length };
+  if (feedback) { out.correct = ok; out.correctAnswer = q.type === "input" ? q.answer : q.correct; }
+  if (q.explanation) out.explanation = String(q.explanation);
+  return out;
+}
+
 // ---------- entry ----------
 function route_(p) {
   if (!check_(p)) return { ok: false, error: "forbidden" };
@@ -863,6 +995,8 @@ function route_(p) {
   if (a === "tblUpdate") return tblUpdate_(p);
   if (a === "tblRemove") return tblRemove_(p);
   if (a === "getBookings") return getBookings_(p);
+  if (a === "testLoad") return testLoad_(p);
+  if (a === "testAnswer") return testAnswer_(p);
   if (a === "setBookingStatus") return setBookingStatus_(p);
   if (a === "getSchedule") return getSchedule_(p);
   if (a === "setSlot") return setSlot_(p);

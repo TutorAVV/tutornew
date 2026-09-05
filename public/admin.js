@@ -51,7 +51,11 @@
   }
 
   async function login() {
-    sessionStorage.setItem("adminKey", $("#adminPass").value);
+    // ключ сохраняем только если в поле что-то введено — иначе при
+    // обновлении страницы сохранённая сессия перезаписывалась пустым
+    const pass = $("#adminPass").value;
+    if (pass) sessionStorage.setItem("adminKey", pass);
+    if (!key()) { $("#loginErr").textContent = "Введите пароль"; return; }
     $("#loginErr").textContent = "";
     try {
       await loadSchedule();
@@ -60,6 +64,7 @@
       renderBookings();
       showApp(true);
       loadStorageInfo();
+      applyHashTab();
     } catch (e) {
       if (e.message !== "unauthorized") $("#loginErr").textContent = "Неверный пароль";
     }
@@ -312,14 +317,20 @@
       </div>
       <div class="form" style="margin-top:14px">
         <div class="row2">
-          <label>ФИО ученика (обновится и в заявках, и в расписании)<input id="sName" value="${esc(s.name || "")}"></label>
+          <label>ФИО ученика<input id="sName" value="${esc(s.name || "")}"></label>
           <label>Класс<input id="sGrade" value="${esc(s.grade || "")}"></label>
         </div>
         <div class="row2">
           <label>Предмет<input id="sSubject" value="${esc(s.subject || "")}"></label>
           <label>Chat ID Telegram<input id="sChat" value="${esc(s.chat_id || "")}" placeholder="заполняется сам после /start + номер"></label>
         </div>
-        <label>Пройденные темы (видит ученик)<textarea id="sTopics" rows="3">${esc(s.topics || "")}</textarea></label>
+        <label>Пройденные темы (видит ученик)
+          <textarea id="sTopics" rows="3" placeholder="Можно выбрать из списка кнопкой ниже или написать вручную">${esc(s.topics || "")}</textarea>
+        </label>
+        <div class="toolbar">
+          <button class="mini-btn" id="sTopicsPick">📚 Выбрать из списка тем</button>
+          <span class="muted-sm">Список — по предметам и классам (4–9); можно оставить и ручной текст</span>
+        </div>
         <label>Заметки для себя (ученик не видит)<textarea id="sNotes" rows="2">${esc(s.notes || "")}</textarea></label>
         <div class="toolbar"><button class="btn btn-primary btn-sm" id="sSave">💾 Сохранить карточку</button><span class="muted-sm" id="sMsg"></span></div>
       </div>
@@ -357,8 +368,75 @@
       $("#nMsg").textContent = msg;
       if (r.ok) { toast(msg, "ok"); $("#nText").value = ""; $("#nLink").value = ""; loadNotes(s.phone); }
     };
+    $("#sTopicsPick").onclick = () => openTopicsModal(s);
     loadNotes(s.phone);
   }
+
+  // ---------- выбор тем из списка (математика/физика, 4–9 классы) ----------
+  function parseTopicsText(text) {
+    // «[Математика] / 7 класс: дроб, уравнения» → { sub: { grade: { тема: 1 } } }
+    const out = {};
+    let sub = null;
+    for (const raw of String(text || "").split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      const sm = line.match(/^\[(.+?)\]$/);
+      if (sm) { sub = sm[1].trim(); out[sub] = out[sub] || {}; continue; }
+      const gm = line.match(/^([^:]+):\s*(.+)$/);
+      if (gm && sub) {
+        const grade = gm[1].trim();
+        out[sub][grade] = out[sub][grade] || {};
+        gm[2].split(",").map((x) => x.trim()).filter(Boolean).forEach((t) => out[sub][grade][t] = 1);
+      }
+    }
+    return out;
+  }
+  async function openTopicsModal(st) {
+    const modal = $("#topicsModal");
+    const body = $("#topicsModalBody");
+    modal.classList.remove("hidden");
+    body.innerHTML = `<div class="muted">Загружаем список… ⏳</div>`;
+    let d = { ok: false, catalog: {}, source: "" };
+    try { d = await api("/api/admin/topics", { headers: H() }); } catch (e) {}
+    const current = parseTopicsText($("#sTopics").value);
+    const subs = Object.keys(d.catalog || {});
+    $("#topicsModalInfo").textContent = d.source === "table"
+      ? "Список загружен из таблицы (лист TopicCatalog — можно править его под свои темы)."
+      : "Встроенный список по школьной программе, 4–9 класс. Чтобы поменять сами темы — лист TopicCatalog в таблице.";
+    if (!subs.length) { body.innerHTML = `<div class="muted">Список тем недоступен. Напишите темы вручную в поле выше.</div>`; return; }
+    body.innerHTML = `<div class="topics-cols">` + subs.map((sub) => `
+      <div class="topics-col">
+        <h4>${esc(sub)}</h4>` + Object.entries(d.catalog[sub]).map(([grade, list]) => `
+          <div class="topics-grade">
+            <b>${esc(grade)}</b>
+            ${list.map((topic) => `
+              <label class="chk chk-sm"><input type="checkbox" data-sub="${esc(sub)}" data-grade="${esc(grade)}" data-topic="${esc(topic)}"
+                ${current[sub] && current[sub][grade] && current[sub][grade][topic] ? "checked" : ""}> ${esc(topic)}</label>`).join("")}
+          </div>`).join("") + `
+      </div>`).join("") + `</div>`;
+  }
+  function saveTopicsPick() {
+    const checks = $$("#topicsModalBody input[type=checkbox]");
+    const order = []; // порядок предметов как в списке
+    const bySub = {};
+    checks.forEach((c) => {
+      const sub = c.dataset.sub, grade = c.dataset.grade, topic = c.dataset.topic;
+      if (!bySub[sub]) { bySub[sub] = {}; order.push(sub); }
+      if (!bySub[sub][grade]) bySub[sub][grade] = [];
+      if (c.checked && !bySub[sub][grade].includes(topic)) bySub[sub][grade].push(topic);
+    });
+    const lines = [];
+    order.forEach((sub) => {
+      const grades = Object.keys(bySub[sub]).filter((g) => bySub[sub][g].length);
+      if (!grades.length) return;
+      lines.push(`[${sub}]`);
+      grades.forEach((g) => lines.push(`${g}: ${bySub[sub][g].join(", ")}`));
+    });
+    $("#sTopics").value = lines.join("\n");
+    $("#topicsModal").classList.add("hidden");
+    toast("Темы подставлены в поле — нажмите «Сохранить карточку»", "ok");
+  }
+
   async function loadNotes(phone) {
     const r = await api(`/api/admin/students/notes?phone=${encodeURIComponent(phone)}`, { headers: H() });
     const list = r.notes || [];
@@ -480,6 +558,71 @@
     } catch (e) { box.innerHTML = `<div class="muted">Ошибка загрузки</div>`; }
   }
 
+  /** Готовый промпт для ЧИ: на выходе — формат, который сайт сам разбирает
+   *  («Ответ: б», «Пояснение: …»). Заполняет преподаватель: предмет/класс/тема/кол-во/сложность. */
+  function aiPromptText(subj, grade, topic, count, diff) {
+    return [
+      `Составь тест по предмету ${subj} для ученика ${grade} класса.`,
+      `Тема: ${topic}.`,
+      `Количество вопросов: ${count}. Сложность: ${diff}.`,
+      "",
+      "Строгие требования к формату (сайт сам разберёт текст):",
+      '- Вопросы нумеруются: "1. Текст вопроса"',
+      "- У каждого вопроса 4 варианта: а) …, б) …, в) …, г) …",
+      '- Сразу после вопроса — отдельной строкой "Ответ: б" (буква правильного варианта)',
+      '- Следующей строкой — "Пояснение: 1–2 предложения, почему этот ответ правильный"',
+      '- 2–3 вопроса могут быть открытыми: вместо вариантов — одна строка "Ответ: 3,14" (точный числовой или короткий ответ)',
+      "- Без лишнего текста, без вступлений и пояснений за пределами формата.",
+      "",
+      "Пример:",
+      "1. Сколько будет 1/2 + 1/3?",
+      "а) 2/5",
+      "б) 5/6",
+      "в) 1/6",
+      "г) 4/5",
+      "Ответ: б",
+      "Пояснение: Общий знаменатель 6: 3/6 + 2/6 = 5/6.",
+    ].join("\n");
+  }
+  function aiPromptBlock() {
+    return `
+      <details style="margin:10px 0 4px;border:1px dashed var(--line);border-radius:12px;padding:8px 12px">
+        <summary class="muted-sm" style="cursor:pointer;font-weight:700">🤖 Промпт для ИИ — заполните тему, скопируйте, вставьте в ChatGPT/Claude/Gemini</summary>
+        <div class="toolbar" style="flex-wrap:wrap;margin-top:10px">
+          <select id="apSubj"><option>Математика</option><option>Физика</option><option>Химия</option><option>Биология</option><option>Информатика</option><option>Русский язык</option><option>Окружающий мир</option></select>
+          <select id="apGrade">${[4, 5, 6, 7, 8, 9].map((g) => `<option>${g} класс</option>`).join("")}</select>
+          <input id="apTopic" type="text" placeholder="Тема: например, дроби" style="min-width:220px">
+          <input id="apCount" type="number" value="10" min="1" max="30" style="width:80px" title="Сколько вопросов">
+          <select id="apDiff"><option>средняя</option><option>лёгкая</option><option>сложная</option></select>
+        </div>
+        <textarea id="apText" rows="10" style="width:100%;margin-top:8px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:monospace;font-size:12.5px" readonly></textarea>
+        <div class="toolbar" style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" id="apCopy">📋 Скопировать промпт</button>
+          <span class="muted-sm">Ответ ИИ вставьте в поле «Текст теста» выше → «Разобрать». Строки «Ответ:» и «Пояснение:» подхватятся автоматически.</span>
+        </div>
+      </details>`;
+  }
+  function bindAiPrompt() {
+    const upd = () => {
+      const el = $("#apText");
+      if (!el) return;
+      el.value = aiPromptText($("#apSubj").value, $("#apGrade").value,
+        $("#apTopic").value.trim() || "тема", $("#apCount").value || "10", $("#apDiff").value);
+    };
+    ["apSubj", "apGrade", "apTopic", "apCount", "apDiff"].forEach((id) => {
+      const el = $("#" + id);
+      if (el) el.addEventListener("input", upd);
+    });
+    upd();
+    const cb = $("#apCopy");
+    if (cb) cb.onclick = () => {
+      const el = $("#apText");
+      const done = () => toast("Промпт скопирован — вставьте в диалог с ИИ", "ok");
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(el.value).then(done, () => { el.focus(); el.select(); document.execCommand("copy"); done(); });
+      else { el.focus(); el.select(); document.execCommand("copy"); done(); }
+    };
+  }
+
   function openTestEditor() {
     curTest = null;
     renderTestsListActive();
@@ -503,10 +646,13 @@
         </div>
         <div id="tParsed" class="hidden">
           <label>Название теста<input id="tTitle"></label>
-          <div class="toolbar">
+          <div class="toolbar" style="flex-wrap:wrap">
             <label class="chk"><input type="checkbox" id="tFeedback" checked> показывать ученику правильность после ответа</label>
             <label class="chk"><input type="checkbox" id="tShowScore" checked> показывать ученику итоговый балл</label>
+            <label class="chk"><input type="checkbox" id="tNoCopy"> запретить копирование текста</label>
+            <label class="chk">попыток: <input type="number" id="tMaxAttempts" value="1" min="1" max="10" style="width:64px;margin:0" title="Сколько раз ученик может пройти тест"></label>
           </div>
+          ${aiPromptBlock()}
           <div id="tPreview"></div>
           <details style="margin:8px 0">
             <summary class="muted-sm" style="cursor:pointer">Правка в JSON (если предпросмотр не идеален)</summary>
@@ -521,6 +667,7 @@
       </div>`;
     $("#tParse").onclick = parseTest;
     $("#tSave").onclick = saveTest;
+    bindAiPrompt();
   }
 
   async function parseTest() {
@@ -561,6 +708,8 @@
       questions,
       feedback: $("#tFeedback").checked,
       showScore: $("#tShowScore").checked,
+      noCopy: $("#tNoCopy").checked,
+      maxAttempts: Math.max(1, Math.min(10, +$("#tMaxAttempts").value || 1)),
     };
     $("#tSaveMsg").textContent = "Сохраняем… ⏳";
     try {
@@ -580,14 +729,17 @@
     $("#tstDetail").innerHTML = `
       <h3 style="margin-top:0">📝 ${esc(t.title)}</h3>
       <div class="muted-sm" style="margin-bottom:10px">вопросов: ${t.count} · создан ${fmtTs(t.created)}<br>
-        обратная связь после ответа: ${t.feedback ? "вкл" : "выкл"} · итоговый балл ученику: ${t.showScore ? "показывается" : "не показывается (результат — только вам)"}</div>
+        обратная связь после ответа: ${t.feedback ? "вкл" : "выкл"} · итоговый балл ученику: ${t.showScore ? "показывается" : "не показывается (результат — только вам)"}<br>
+        копирование текста: ${t.noCopy ? "запрещено" : "разрешено"} · попыток: ${t.maxAttempts > 1 ? "до " + t.maxAttempts : "1"}</div>
       <div class="toolbar">
         <button class="btn btn-primary btn-sm" id="tAssign">📤 Отправить ученику</button>
+        <button class="mini-btn" id="tEdit">✏️ Редактировать</button>
         <button class="mini-btn" id="tResults">📊 Результаты</button>
         <button class="mini-btn danger" id="tDelete">🗑 Удалить</button>
       </div>
       <div id="tAssignList" style="margin-top:14px"></div>`;
     $("#tAssign").onclick = () => openTestSend(t);
+    $("#tEdit").onclick = () => editTest(t.id);
     $("#tResults").onclick = () => loadTestResults(t);
     $("#tDelete").onclick = async () => {
       if (!confirm(`Удалить тест «${t.title}» вместе с результатами?`)) return;
@@ -600,6 +752,73 @@
       } catch (e) { toast("Не получилось: " + e.message, "err"); }
     };
     loadTestResults(t, true);
+  }
+  /** Редактор сохранённого теста. Вопросы из таблицы 0-индексные —
+   *  для правки переводим в 1-индексные, сервер при сохранении переведёт обратно. */
+  async function editTest(id) {
+    let data;
+    try {
+      data = await api(`/api/admin/tests/${encodeURIComponent(id)}`, { headers: H() });
+    } catch (e) { return toast("Не удалось загрузить тест: " + e.message, "err"); }
+    if (!data.ok) return toast(data.error || "Ошибка", "err");
+    const t = data.test;
+    const questions = t.questions.map((q) => {
+      const o = { type: q.type, text: q.text };
+      if (q.type === "input") o.answer = q.answer;
+      else { o.options = q.options || []; o.correct = (q.correct || []).map((x) => x + 1); }
+      if (q.multi) o.multi = true;
+      if (q.explanation) o.explanation = q.explanation;
+      return o;
+    });
+    $("#tstDetail").innerHTML = `
+      <h3 style="margin-top:0">✏️ Редактирование теста</h3>
+      <p class="muted-sm">Изменения применяются сразу. Ученик, который ещё не начал, увидит новую версию; начавший — ту, что открыл.</p>
+      <div class="form">
+        <label>Название теста<input id="eTitle" value="${esc(t.title)}"></label>
+        <div class="toolbar" style="flex-wrap:wrap">
+          <label class="chk"><input type="checkbox" id="eFeedback" ${t.feedback ? "checked" : ""}> показывать ученику правильность после ответа</label>
+          <label class="chk"><input type="checkbox" id="eShowScore" ${t.showScore ? "checked" : ""}> показывать ученику итоговый балл</label>
+          <label class="chk"><input type="checkbox" id="eNoCopy" ${t.noCopy ? "checked" : ""}> запретить копирование текста</label>
+          <label class="chk">попыток: <input type="number" id="eMaxAttempts" value="${t.maxAttempts}" min="1" max="10" style="width:64px;margin:0"></label>
+        </div>
+        ${aiPromptBlock()}
+        <details style="margin:8px 0" open>
+          <summary class="muted-sm" style="cursor:pointer">Вопросы (JSON) — редактировать аккуратно, правильные варианты — номером 1–4</summary>
+          <textarea id="eJson" rows="14" style="width:100%;margin-top:6px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:monospace;font-size:12.5px">${esc(JSON.stringify(questions, null, 2))}</textarea>
+        </details>
+        <div class="toolbar">
+          <button class="btn btn-primary btn-sm" id="eSave">💾 Сохранить изменения</button>
+          <button class="btn btn-ghost btn-sm" id="eCancel">← Назад</button>
+          <span class="muted-sm" id="eSaveMsg"></span>
+        </div>
+        <div class="form-err" id="eErr"></div>
+      </div>`;
+    $("#eCancel").onclick = () => openTest(id);
+    $("#eSave").onclick = async () => {
+      let qs;
+      try { qs = JSON.parse($("#eJson").value); }
+      catch (e) { return $("#eErr").textContent = "JSON сломан: " + e.message; }
+      $("#eSaveMsg").textContent = "Сохраняем… ⏳";
+      $("#eErr").textContent = "";
+      try {
+        const r = await api(`/api/admin/tests/${encodeURIComponent(id)}`, {
+          method: "PUT", headers: H(),
+          body: JSON.stringify({
+            title: $("#eTitle").value.trim() || "Тест",
+            questions: qs,
+            feedback: $("#eFeedback").checked,
+            showScore: $("#eShowScore").checked,
+            noCopy: $("#eNoCopy").checked,
+            maxAttempts: Math.max(1, Math.min(10, +$("#eMaxAttempts").value || 1)),
+          }),
+        });
+        if (!r.ok) throw new Error(r.error || "Не получилось");
+        toast("Тест обновлён", "ok");
+        await loadTests();
+        openTest(id);
+      } catch (e2) { $("#eSaveMsg").textContent = ""; $("#eErr").textContent = e2.message; }
+    };
+    bindAiPrompt();
   }
   function renderTestsListActive() {
     $$("#tstList [data-tid]").forEach((el) => el.classList.toggle("active", !!curTest && el.dataset.tid === curTest.id));
@@ -711,6 +930,7 @@
         ${m.type === "textarea"
           ? `<textarea data-k="${m.key}" rows="3">${esc(s[m.key] || "")}</textarea>`
           : `<input data-k="${m.key}" type="${m.type === "number" ? "number" : "text"}" value="${esc(s[m.key] || "")}">`}
+        ${m.hint ? `<span class="set-hint">${esc(m.hint)}</span>` : ""}
       </label>`).join("");
     const e = d.env || {};
     $("#envState").innerHTML = [
@@ -732,15 +952,33 @@
   }
 
   // ---------- init ----------
+  // Вкладка — в адресной строке (#tests, #students, …): при обновлении страницы
+  // открывается та же вкладка, а назад/вперёд работают.
+  const TAB_NAMES = ["schedule", "bookings", "slots", "students", "tests", "tg", "settings", "help"];
+  function switchTab(name) {
+    if (!TAB_NAMES.includes(name)) name = "schedule";
+    $$(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+    TAB_NAMES.forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== name));
+    if (name === "students") loadStudents();
+    if (name === "tests") loadTests();
+    if (name === "settings") loadSettings();
+    if (name === "tg") { loadTgStatus(); loadTgUsers(); clearInterval(tgTimer); tgTimer = setInterval(() => { if (!$("#tab-tg").classList.contains("hidden")) { loadTgUsers(); if (curChat) loadChat(); } }, 20000); }
+  }
+  function applyHashTab() {
+    if (!key()) return;
+    const h = location.hash.replace(/^#/, "");
+    const name = TAB_NAMES.includes(h) ? h : "schedule";
+    if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+    switchTab(name);
+  }
+  function onTabClick(e) {
+    const name = e.currentTarget.dataset.tab;
+    if (location.hash !== "#" + name) location.hash = name;
+    else switchTab(name);
+  }
   function init() {
-    $$(".tab").forEach((t) => t.onclick = () => {
-      $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
-      ["schedule", "bookings", "slots", "students", "tests", "tg", "settings", "help"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
-      if (t.dataset.tab === "students") loadStudents();
-      if (t.dataset.tab === "tests") loadTests();
-      if (t.dataset.tab === "settings") loadSettings();
-      if (t.dataset.tab === "tg") { loadTgStatus(); loadTgUsers(); clearInterval(tgTimer); tgTimer = setInterval(() => { if (!$("#tab-tg").classList.contains("hidden")) { loadTgUsers(); if (curChat) loadChat(); } }, 20000); }
-    });
+    $$(".tab").forEach((t) => t.onclick = onTabClick);
+    window.addEventListener("hashchange", applyHashTab);
     $("#loginBtn").onclick = login;
     $("#adminPass").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
     $("#logoutBtn").onclick = () => { sessionStorage.removeItem("adminKey"); showApp(false); };
@@ -770,6 +1008,10 @@
 
     $("#stSearch").oninput = renderStudents;
     $("#stReload").onclick = loadStudents;
+
+    $("#topicsSave").onclick = saveTopicsPick;
+    $("#topicsCancel").onclick = () => $("#topicsModal").classList.add("hidden");
+    $("#topicsNone").onclick = () => $$("#topicsModalBody input[type=checkbox]").forEach((c) => c.checked = false);
 
     $("#tstReload").onclick = loadTests;
     $("#tstNew").onclick = openTestEditor;
