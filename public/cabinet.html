@@ -37,43 +37,111 @@
       <div class="form-err" id="cErr"></div>
     </div>
 
+    <div id="loadingBox" class="panel-lite center hidden" style="max-width:520px;margin:0 auto">
+      <div style="font-size:40px">🎓</div>
+      <h3 style="margin:8px 0 4px">Открываем кабинет…</h3>
+      <p class="muted" style="margin:0">⏳ Загружаем ваши занятия</p>
+    </div>
+
     <div id="cab" class="hidden">
       <div class="cab-head">
         <div>
           <h2 id="cName">Ученик</h2>
           <div class="muted" id="cMeta"></div>
         </div>
-        <a class="btn btn-primary btn-sm" href="/#booking">📅 Записаться</a>
+        <div class="rowbtns">
+          <a class="btn btn-primary btn-sm" href="/#booking" style="text-decoration:none">📅 Записаться</a>
+          <button class="mini-btn" id="logoutBtn2">Выйти</button>
+        </div>
       </div>
 
-      <div class="stats-row" id="cStats"></div>
+      <div class="cab-nav" id="cabNav">
+        <button class="cab-tab" data-view="">🏠 Главная</button>
+        <button class="cab-tab" data-view="schedule">🗓 Расписание</button>
+        <button class="cab-tab" data-view="tests">📝 Тесты</button>
+        <button class="cab-tab" data-view="messages">📨 Сообщения</button>
+        <button class="cab-tab" data-view="topics">📚 Темы</button>
+      </div>
 
-      <div class="cab-grid">
-        <div class="panel-lite">
-          <h3>📅 Ближайшие занятия</h3>
-          <div id="cUpcoming"></div>
-          <div class="muted-sm" id="cReschedNote" style="margin-top:8px"></div>
+      <!-- ГЛАВНАЯ: только общая информация, остальное — по ссылкам -->
+      <div id="view-home">
+        <div class="stats-row" id="cStats"></div>
+        <div class="cab-grid">
+          <div class="panel-lite">
+            <div class="panel-head">
+              <h3>📅 Ближайшее занятие</h3>
+              <button class="mini-btn cab-refresh" data-refresh="home" title="Обновить">🔄</button>
+            </div>
+            <div id="cUpcoming"></div>
+            <div id="cReschedBlock"></div>
+          </div>
+          <div class="panel-lite">
+            <div class="panel-head">
+              <h3>🚀 Разделы</h3>
+            </div>
+            <div id="cQuick"></div>
+          </div>
         </div>
-        <div class="panel-lite">
-          <h3>📨 От преподавателя</h3>
-          <div id="cNotes"></div>
+        <div class="panel-lite hidden" id="cTgHint" style="margin-top:16px">
+          <b>✈️ Telegram не привязан.</b> <span class="muted">Откройте бота, нажмите /start и поделитесь номером — тогда напоминания и домашние задания будут приходить в Telegram.</span>
         </div>
+      </div>
+
+      <!-- РАСПИСАНИЕ: календарь со слотами (будущие и прошедшие) -->
+      <div id="view-schedule" class="hidden">
         <div class="panel-lite">
-          <h3>📝 Задания (тесты)</h3>
+          <div class="cal-head">
+            <button class="mini-btn" id="calPrev" title="Предыдущий месяц">‹</button>
+            <b id="calTitle"></b>
+            <button class="mini-btn" id="calNext" title="Следующий месяц">›</button>
+            <button class="mini-btn" id="calToday">Сегодня</button>
+            <span class="spacer"></span>
+            <button class="mini-btn cab-refresh" data-refresh="lessons" title="Обновить">🔄</button>
+          </div>
+          <div class="cal-weekdays">
+            <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div class="cal-legend">
+            <span><i class="dot d-new"></i>ждёт подтверждения</span>
+            <span><i class="dot d-confirmed"></i>подтверждено</span>
+            <span><i class="dot d-done"></i>проведено</span>
+            <span><i class="dot d-cancelled"></i>отменено</span>
+          </div>
+          <div id="calDay"></div>
+        </div>
+      </div>
+
+      <!-- ТЕСТЫ (бывший блок «Задания») -->
+      <div id="view-tests" class="hidden">
+        <div class="panel-lite">
+          <div class="panel-head">
+            <h3>📝 Тесты</h3>
+            <button class="mini-btn cab-refresh" data-refresh="tests" title="Обновить">🔄</button>
+          </div>
           <div id="cTests"></div>
         </div>
+      </div>
+
+      <!-- СООБЩЕНИЯ ОТ ПРЕПОДАВАТЕЛЯ (бывший блок) -->
+      <div id="view-messages" class="hidden">
         <div class="panel-lite">
-          <h3>📚 Пройденные темы</h3>
-          <div id="cTopics" class="muted"></div>
-        </div>
-        <div class="panel-lite">
-          <h3>🕓 История занятий</h3>
-          <div id="cHistory"></div>
+          <div class="panel-head">
+            <h3>📨 От преподавателя</h3>
+            <button class="mini-btn cab-refresh" data-refresh="notes" title="Обновить">🔄</button>
+          </div>
+          <div id="cNotes"></div>
         </div>
       </div>
 
-      <div class="panel-lite hidden" id="cTgHint" style="margin-top:16px">
-        <b>✈️ Telegram не привязан.</b> <span class="muted">Откройте бота, нажмите /start и поделитесь номером — тогда напоминания и домашние задания будут приходить в Telegram.</span>
+      <!-- ПРОЙДЕННЫЕ ТЕМЫ -->
+      <div id="view-topics" class="hidden">
+        <div class="panel-lite">
+          <div class="panel-head">
+            <h3>📚 Пройденные темы</h3>
+          </div>
+          <div id="cTopics" class="muted"></div>
+        </div>
       </div>
     </div>
   </div>

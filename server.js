@@ -60,12 +60,34 @@ const SETTINGS_META = [
   { key: "rescheduleHours", label: "Перенос возможен не позже чем за N часов до занятия", type: "number" },
   { key: "reminderMinutes", label: "Напоминание в Telegram за N минут до занятия", type: "number" },
   { key: "tzLabel", label: "Подпись часового пояса (например МСК+2)", type: "text" },
-  { key: "tzOffsetMin", label: "Смещение часового пояса от UTC, минут (МСК+2 = 300)", type: "number" },
+  { key: "tzOffsetMin", label: "Смещение часового пояса от UTC, минут", type: "number",
+    hint: "Числом записывается ваш часовой пояс: Москва = 180, Екатеринбург (МСК+2) = 300. Сайт по нему понимает, какие слоты уже прошли, и вовремя шлёт напоминания." },
   { key: "tutorTg", label: "Telegram преподавателя для связи (без @)", type: "text" },
   { key: "contactsText", label: "Текст в разделе «Контакты»", type: "text" },
   { key: "bookingNote", label: "Подсказка под формой записи", type: "text" },
   { key: "cabinetEnabled", label: "Личный кабинет ученика включён (1/0)", type: "number" },
 ];
+
+/** Каталог пройденных тем (российская школа, 4–9 классы) — для чекбоксов в админке.
+ *  Можно переопределить строками листа TopicCatalog (колонки: subject, grade, topics через запятую). */
+const TOPICS_CATALOG = {
+  "Математика": {
+    "4 класс": ["Натуральные числа и действия с ними", "Уравнения", "Обыкновенные дроби", "Периметр и площадь", "Таблицы и диаграммы"],
+    "5 класс": ["Натуральные числа", "Обыкновенные дроби", "Десятичные дроби", "Проценты", "Буквенные выражения", "Простые уравнения"],
+    "6 класс": ["Делимость чисел", "Действия с обыкновенными дробями", "Отношения и пропорции", "Целые и рациональные числа", "Координатная плоскость"],
+    "7 класс": ["Многочлены", "Формулы сокращённого умножения", "Уравнения", "Функции и их графики", "Неравенства", "Треугольники и параллельные прямые (геометрия)"],
+    "8 класс": ["Квадратные уравнения", "Квадратный корень", "Линейная функция и её график", "Четырёхугольники", "Окружность и круг", "Начало тригонометрии: синус и косинус"],
+    "9 класс": ["Квадратные уравнения и функции (ОГЭ)", "Арифметическая и геометрическая прогрессии", "Векторы", "Статистика и теория вероятностей", "Планиметрия (ОГЭ)"],
+  },
+  "Физика": {
+    "4 класс": ["Что такое физика и окружающий мир", "Свет и тень", "Звук", "Простые механизмы: рычаг, блок"],
+    "5 класс": ["Материя и её свойства", "Тепловые явления", "Первое знакомство с электризацией", "Безопасность при опытах"],
+    "6 класс": ["Наблюдения и измерения", "Движение в природе", "Магнитное притяжение (первые опыты)", "Техника и энергия"],
+    "7 класс": ["Физические величины и единицы измерения", "Механическое движение", "Плотность", "Сила и вес", "Давление твёрдых тел, жидкостей и газов", "Рычаги, работа и энергия"],
+    "8 класс": ["Тепловые явления. Теплопередача", "Молекулярное строение вещества", "Внутренняя энергия", "Тепловые двигатели", "Электрический ток и его действие", "Электричество в быту"],
+    "9 класс": ["Равномерное и неравномерное движение", "Законы Ньютона", "Импульс и его сохранение", "Работа, мощность, энергия", "Колебания и волны", "Ток: закон Ома, сопротивление, мощность"],
+  },
+};
 
 app.use(cors());
 app.use(express.json({ limit: "256kb" }));
@@ -223,6 +245,10 @@ async function saveSettings(patch) {
 }
 function cfgNum(s, k, def) { const n = +s[k]; return Number.isFinite(n) ? n : def; }
 function cfgList(s, k) { return String(s[k] || "").split(",").map((x) => x.trim()).filter(Boolean); }
+/** Флаг «вкл/выкл» из таблицы: в Google Sheets строка "0" читается как ЧИСЛО 0,
+ *  поэтому сравниваем через String, иначе выключенное «показывается» всё равно. */
+function flagOn(v) { return String(v == null ? "" : v) !== "0"; }
+function clampInt(v, min, max) { const n = Math.trunc(+v); if (!Number.isFinite(n)) return min; return Math.max(min, Math.min(max, n)); }
 async function publicConfig() {
   const s = await getSettings();
   return {
@@ -236,7 +262,7 @@ async function publicConfig() {
     rescheduleHours: cfgNum(s, "rescheduleHours", 12),
     reminderMinutes: cfgNum(s, "reminderMinutes", 60),
     contactsText: s.contactsText, bookingNote: s.bookingNote,
-    cabinetEnabled: s.cabinetEnabled !== "0",
+    cabinetEnabled: flagOn(s.cabinetEnabled),
     botEnabled: !!BOT_TOKEN,
     botUsername: BOT_USERNAME,
   };
@@ -520,6 +546,56 @@ async function allBookings() {
   if (APPS_SCRIPT_URL) { const r = await appsScript("getBookings", {}); return (r.bookings || []).map((x) => ({ ...x, iso: x.iso || toIso(x.date) })); }
   return loadDb().bookings.map((x) => ({ ...x, iso: x.date, date: toDsp(x.date) }));
 }
+/** Все предметы ученика: из карточки + из всех его записей (без дублей, по порядку) */
+function studentSubjects(st, mine) {
+  const out = [];
+  const push = (s) => { s = String(s || "").trim(); if (s && !out.some((x) => x.toLowerCase() === s.toLowerCase())) out.push(s); };
+  push(st && st.subject);
+  for (const b of mine) push(b.subject);
+  return out;
+}
+/** Все занятия ученика для календаря (будущие + прошедшие + отменённые).
+ *  Склеиваем два источника (заявки + «мои записи»), чтобы ни одно занятие не потерялось. */
+async function cabinetLessons(phone) {
+  const [all, active] = await Promise.all([allBookings(), activeBookings(phone)]);
+  const map = new Map();
+  const norm = (b) => ({ id: b.id, iso: b.iso || toIso(b.date) || "", dsp: toDsp(b.iso || toIso(b.date)), time: b.time, subject: b.subject || "", status: b.status || "new" });
+  for (const b of all) { if (!b.id) continue; map.set(String(b.id), norm(b)); }
+  for (const b of active) {
+    if (!b.id) continue;
+    const e = map.get(String(b.id));
+    if (e) { if (!e.time) e.time = b.time; if (!e.subject) e.subject = b.subject || ""; if (e.iso !== b.iso) { e.iso = b.iso; e.dsp = b.dsp; } }
+    else map.set(String(b.id), norm(b));
+  }
+  return [...map.values()].filter((b) => b.iso).sort((a, b) => (a.iso + a.time < b.iso + b.time ? -1 : 1));
+}
+/** Тесты ученика (для кабинета и отдельной страницы) */
+function buildMyTests(phone, assigns, tests) {
+  const testById = new Map(tests.map((t) => [String(t.id), t]));
+  return assigns.filter((a) => samePhone(a.phone, phone) && flagOn(a.visible))
+    .sort((a, b) => (String(a.createdAt) < String(b.createdAt) ? 1 : -1))
+    .map((a) => {
+      const t = testById.get(String(a.testId));
+      const answers = parseAssignAnswers(a);
+      const maxAttempts = Math.max(1, Math.min(10, +(t && t.maxAttempts) || 1));
+      const attempts = Math.max(0, +a.attempts || 0);
+      return {
+        id: a.id, title: a.title || (t && t.title) || "Тест", status: a.status || "assigned",
+        score: a.score === "" || a.score == null ? null : +a.score,
+        total: +a.total || +(t && t.count) || 0,
+        answered: Object.keys(answers).length,
+        showScore: !t || flagOn(t.showScore),
+        maxAttempts, attempts, canRetry: a.status === "finished" && attempts < maxAttempts,
+        createdAt: a.createdAt, finishedAt: a.finishedAt || "",
+      };
+    });
+}
+/** Сообщения преподавателя в кабинет (без тестовых) */
+function buildMyNotes(phone, notes) {
+  return notes.filter((n) => samePhone(n.phone, phone) && n.type !== "test")
+    .sort((a, b) => (a.ts < b.ts ? 1 : -1))
+    .map((n) => ({ id: n.id, ts: n.ts, type: n.type, text: n.text, link: n.link }));
+}
 /** Карточка ученика создаётся/обновляется при записи */
 async function touchStudent(s) {
   const key = digits(s.phone).slice(-10);
@@ -550,52 +626,65 @@ function studentStats(phone, bookings, cfg) {
   return { total: mine.length, done, cancelled, upcoming: upcoming.length, lastDone: last };
 }
 
-/** Кабинет ученика: вход по телефону (тестовый режим, без пароля) */
+/** Кабинет ученика: главная страница (тестовый режим, вход по телефону без пароля).
+ *  Держим её лёгкой: остальное (расписание, тесты, сообщения) подгружается отдельными
+ *  запросами при открытии соответствующих разделов кабинета (#/schedule, #/tests, …). */
 app.get("/api/cabinet", async (req, res) => {
   const phone = req.query.phone || "";
   if (digits(phone).length < 10) return res.status(400).json({ ok: false, error: "Укажите телефон" });
   try {
     const cfg = await publicConfig();
     if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
-    const [students, bookings, notes, users, assigns, tests] = await Promise.all([tbl.list("Students"), allBookings(), tbl.list("Notes"), tbl.list("Users"), tbl.list("TestAssign"), tbl.list("Tests")]);
+    const [students, bookings, notes, users, assigns, tests, lessons] = await Promise.all([
+      tbl.list("Students"), allBookings(), tbl.list("Notes"), tbl.list("Users"),
+      tbl.list("TestAssign"), tbl.list("Tests"), cabinetLessons(phone),
+    ]);
     const st = students.find((x) => samePhone(x.phone, phone));
     const mine = bookings.filter((b) => samePhone(b.phone, phone));
     if (!st && !mine.length) return res.status(404).json({ ok: false, error: "Ученик с таким номером не найден. Сначала запишитесь на занятие." });
     const lastB = mine[0] || {};
     const today = tutorTodayIso(cfg.tzOffsetMin);
-    const upcoming = decorateBookings(mine.filter((b) => b.status !== "cancelled" && b.status !== "done" && b.iso >= today), cfg)
-      .map((b) => ({ id: b.id, dsp: b.dsp, time: b.time, subject: b.subject, status: b.status, canReschedule: b.canReschedule }));
-    const history = mine.filter((b) => b.status === "done").sort((a, b) => (a.iso + a.time < b.iso + b.time ? 1 : -1)).slice(0, 30)
-      .map((b) => ({ date: toDsp(b.iso), time: b.time, subject: b.subject }));
-    const myNotes = notes.filter((n) => samePhone(n.phone, phone) && n.type !== "test").sort((a, b) => (a.ts < b.ts ? 1 : -1))
-      .map((n) => ({ id: n.id, ts: n.ts, type: n.type, text: n.text, link: n.link }));
-    const testById = new Map(tests.map((t) => [String(t.id), t]));
-    const myTests = assigns.filter((a) => samePhone(a.phone, phone) && a.visible !== "0")
-      .sort((a, b) => (String(a.createdAt) < String(b.createdAt) ? 1 : -1))
-      .map((a) => {
-        const t = testById.get(String(a.testId));
-        const answers = parseAssignAnswers(a);
-        return {
-          id: a.id, title: a.title || (t && t.title) || "Тест", status: a.status || "assigned",
-          score: a.score === "" || a.score == null ? null : +a.score,
-          total: +a.total || +(t && t.count) || 0,
-          answered: Object.keys(answers).length,
-          showScore: !t || t.showScore !== "0",
-          createdAt: a.createdAt, finishedAt: a.finishedAt || "",
-        };
-      });
+    const upcoming = decorateBookings(lessons.filter((b) => b.status !== "cancelled" && b.status !== "done" && b.iso >= today), cfg);
+    const next = upcoming.length ? upcoming[0] : null;
+    const myTests = buildMyTests(phone, assigns, tests);
+    const myNotes = buildMyNotes(phone, notes);
     const tgLinked = !!(st && st.chat_id) || users.some((u) => u.phone && samePhone(u.phone, phone));
     res.json({
       ok: true,
       student: {
         name: (st && st.name) || lastB.name || "", grade: (st && st.grade) || lastB.grade || "",
-        subject: (st && st.subject) || lastB.subject || "", topics: (st && st.topics) || "", phone: (st && st.phone) || lastB.phone || phone,
+        subject: studentSubjects(st, mine).join(" · "), topics: (st && st.topics) || "", phone: (st && st.phone) || lastB.phone || phone,
       },
-      stats: studentStats(phone, bookings, cfg), upcoming, history, notes: myNotes, tests: myTests, tgLinked,
+      stats: studentStats(phone, bookings, cfg),
+      next: next ? { id: next.id, dsp: next.dsp, time: next.time, subject: next.subject, status: next.status } : null,
+      upcomingTotal: upcoming.length,
+      testsCount: myTests.length, notesCount: myNotes.length,
+      tgLinked,
       rescheduleHours: cfg.rescheduleHours, tzLabel: cfg.tzLabel,
     });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "cabinet failed" }); }
 });
+
+/** Разделы кабинета (подгружаются при переходе: #/schedule, #/tests, #/messages) */
+async function cabinetSection(req, res, build) {
+  const phone = req.query.phone || "";
+  if (digits(phone).length < 10) return res.status(400).json({ ok: false, error: "Укажите телефон" });
+  try {
+    const cfg = await publicConfig();
+    if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
+    res.json(await build(cfg));
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "cabinet section failed" }); }
+}
+app.get("/api/cabinet/lessons", (req, res) => cabinetSection(req, res, async () => ({
+  ok: true, lessons: await cabinetLessons(req.query.phone || ""),
+})));
+app.get("/api/cabinet/tests", (req, res) => cabinetSection(req, res, async () => {
+  const [assigns, tests] = await Promise.all([tbl.list("TestAssign"), tbl.list("Tests")]);
+  return { ok: true, tests: buildMyTests(req.query.phone || "", assigns, tests) };
+}));
+app.get("/api/cabinet/notes", (req, res) => cabinetSection(req, res, async () => ({
+  ok: true, notes: buildMyNotes(req.query.phone || "", await tbl.list("Notes")),
+})));
 
 // ---------- admin ----------
 function needAdmin(req, res, next) {
@@ -923,11 +1012,20 @@ app.get("/api/admin/students", needAdmin, async (req, res) => {
       if (k.length < 10 || byKey.has(k)) continue;
       byKey.set(k, { phone: b.phone, name: b.name, grade: b.grade || "", subject: b.subject || "", chat_id: b.chatId || "", topics: "", notes: "", created: "", virtual: true });
     }
+    const bookingsByPhone = new Map();
+    for (const b of bookings) {
+      const pk = digits(b.phone).slice(-10);
+      if (pk.length < 10) continue;
+      if (!bookingsByPhone.has(pk)) bookingsByPhone.set(pk, []);
+      bookingsByPhone.get(pk).push(b);
+    }
     const out = [];
     for (const [k, s] of byKey) {
       const u = users.find((x) => x.phone && digits(x.phone).slice(-10) === k);
       const chatId = s.chat_id || (u ? String(u.chat_id) : "");
-      out.push({ ...s, chat_id: chatId, tg: u ? "@" + (u.username || "") : "", stats: studentStats(s.phone, bookings, cfg) });
+      out.push({ ...s, chat_id: chatId, tg: u ? "@" + (u.username || "") : "",
+        subjects: studentSubjects(s, bookingsByPhone.get(k) || []).join(" · "),
+        stats: studentStats(s.phone, bookings, cfg) });
     }
     out.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ru"));
     res.json({ ok: true, students: out });
@@ -938,7 +1036,8 @@ app.put("/api/admin/students", needAdmin, async (req, res) => {
   if (digits(b.phone).length < 10) return res.status(400).json({ ok: false, error: "bad phone" });
   try {
     const patch = {};
-    for (const k of ["name", "grade", "subject", "topics", "notes", "chat_id"]) if (k in b) patch[k] = esc(b[k], 4000);
+    const fieldLimit = { name: 200, grade: 60, subject: 300, topics: 8000, notes: 8000, chat_id: 40 };
+    for (const k of Object.keys(fieldLimit)) if (k in b) patch[k] = esc(b[k], fieldLimit[k]);
     const list = await tbl.list("Students");
     const ex = list.find((x) => samePhone(x.phone, b.phone));
     if (ex) await tbl.update("Students", "phone", ex.phone, patch);
@@ -961,6 +1060,21 @@ app.put("/api/admin/students", needAdmin, async (req, res) => {
     }
     res.json({ ok: true, renamed });
   } catch (e) { res.status(500).json({ ok: false, error: "save failed" }); }
+});
+/** Каталог тем для чекбоксов: по умолчанию из кода (TOPICS_CATALOG),
+ *  если преподаватель заполнил лист TopicCatalog — оттуда (subject, grade, topics через запятую). */
+app.get("/api/admin/topics", needAdmin, async (req, res) => {
+  try {
+    const rows = await tbl.list("TopicCatalog");
+    const catalog = {};
+    for (const r of rows) {
+      const subj = String(r.subject || "").trim(), grade = String(r.grade || "").trim();
+      if (!subj || !grade) continue;
+      (catalog[subj] = catalog[subj] || {})[grade] = String(r.topics || "").split(",").map((x) => x.trim()).filter(Boolean);
+    }
+    if (Object.keys(catalog).length) return res.json({ ok: true, catalog, source: "table" });
+  } catch (e) { console.error("topics catalog:", e.message); }
+  res.json({ ok: true, catalog: TOPICS_CATALOG, source: "default" });
 });
 app.get("/api/admin/students/notes", needAdmin, async (req, res) => {
   try {
@@ -1222,7 +1336,9 @@ app.post("/api/admin/tests", needAdmin, async (req, res) => {
     if (!questions.length) return res.status(400).json({ ok: false, error: "Нет ни одного корректного вопроса" });
     const row = {
       id: newId("TS"), title: esc(b.title || "Тест", 200), questions: JSON.stringify(questions),
-      count: questions.length, feedback: b.feedback === false ? "0" : "1", showScore: b.showScore === false ? "0" : "1",
+      count: questions.length,
+      feedback: b.feedback === false ? "0" : "1", showScore: b.showScore === false ? "0" : "1",
+      noCopy: b.noCopy ? "1" : "0", maxAttempts: String(clampInt(b.maxAttempts, 1, 10)),
       created: new Date().toISOString(),
     };
     await tbl.append("Tests", row);
@@ -1234,13 +1350,38 @@ app.get("/api/admin/tests", needAdmin, async (req, res) => {
   try {
     const [tests, assigns] = await Promise.all([tbl.list("Tests"), tbl.list("TestAssign")]);
     const out = tests.map((t) => ({
-      id: t.id, title: t.title, count: +t.count || 0, feedback: t.feedback !== "0", showScore: t.showScore !== "0",
+      id: t.id, title: t.title, count: +t.count || 0,
+      feedback: flagOn(t.feedback), showScore: flagOn(t.showScore), noCopy: flagOn(t.noCopy),
+      maxAttempts: clampInt(t.maxAttempts, 1, 10),
       created: t.created,
       assigned: assigns.filter((a) => String(a.testId) === String(t.id)).length,
       finished: assigns.filter((a) => String(a.testId) === String(t.id) && a.status === "finished").length,
     })).sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
     res.json({ ok: true, tests: out });
   } catch (e) { res.status(500).json({ ok: false, error: "list failed" }); }
+});
+/** Полностью открыть тест (для редактирования: вопросы + настройки) */
+app.put("/api/admin/tests/:id", needAdmin, async (req, res) => {
+  const b = req.body || {};
+  try {
+    const tests = await tbl.list("Tests");
+    const t = tests.find((x) => String(x.id) === String(req.params.id));
+    if (!t) return res.status(404).json({ ok: false, error: "Тест не найден" });
+    const patch = {};
+    if (b.title !== undefined) patch.title = esc(b.title || "Тест", 200);
+    if (b.questions !== undefined) {
+      const questions = normalizeQuestions(b.questions);
+      if (!questions.length) return res.status(400).json({ ok: false, error: "Нет ни одного корректного вопроса" });
+      patch.questions = JSON.stringify(questions);
+      patch.count = questions.length;
+    }
+    if (b.feedback !== undefined) patch.feedback = b.feedback ? "1" : "0";
+    if (b.showScore !== undefined) patch.showScore = b.showScore ? "1" : "0";
+    if (b.noCopy !== undefined) patch.noCopy = b.noCopy ? "1" : "0";
+    if (b.maxAttempts !== undefined) patch.maxAttempts = String(clampInt(b.maxAttempts, 1, 10));
+    await tbl.update("Tests", "id", t.id, patch);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "save failed" }); }
 });
 app.delete("/api/admin/tests/:id", needAdmin, async (req, res) => {
   try {
@@ -1262,10 +1403,11 @@ app.post("/api/admin/tests/assign", needAdmin, async (req, res) => {
     const students = await tbl.list("Students");
     const st = students.find((x) => samePhone(x.phone, b.phone));
     const id = newId("Q");
+    const maxAttempts = clampInt(t.maxAttempts, 1, 10);
     const row = {
       id, testId, title: t.title, phone: String(b.phone), name: (st && st.name) || b.name || "",
       status: "assigned", answers: "", score: "", total: t.count || "0",
-      visible: b.sendCab === false ? "0" : "1",
+      visible: b.sendCab === false ? "0" : "1", attempts: "0",
       createdAt: new Date().toISOString(), startedAt: "", finishedAt: "",
     };
     await tbl.append("TestAssign", row);
@@ -1277,11 +1419,12 @@ app.post("/api/admin/tests/assign", needAdmin, async (req, res) => {
         const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
         const base = PUBLIC_URL || `${proto}://${req.headers.host}`;
         const link = `${base}/test.html?t=${id}`;
-        const r = await tgSend(chatId, `📝 Новый тест: «${t.title}»\nВопросов: ${t.count}\nПройти можно один раз — ${link}`);
+        const tries = maxAttempts > 1 ? `Попыток: до ${maxAttempts} — ` : "Пройти можно один раз — ";
+        const r = await tgSend(chatId, `📝 Новый тест: «${t.title}»\nВопросов: ${t.count}\n${tries}${link}`);
         tg = r.ok ? "sent" : "failed";
       } else tg = "no-chat";
     } else tg = "skipped";
-    res.json({ ok: true, assignment: { ...row, answers: undefined }, tg });
+    res.json({ ok: true, assignment: { ...row, answers: undefined, maxAttempts }, tg });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "assign failed" }); }
 });
 /** Результаты теста (только преподаватель): кто, когда, балл, ответы по вопросам */
@@ -1306,63 +1449,112 @@ app.get("/api/admin/tests/results", needAdmin, async (req, res) => {
         return {
           id: a.id, name: a.name, phone: a.phone, status: a.status || "assigned",
           score: a.score === "" || a.score == null ? null : +a.score, total: +a.total || questions.length,
-          createdAt: a.createdAt, startedAt: a.startedAt || "", finishedAt: a.finishedAt || "", visible: a.visible !== "0",
+          createdAt: a.createdAt, startedAt: a.startedAt || "", finishedAt: a.finishedAt || "", visible: flagOn(a.visible),
+          attempts: Math.max(0, +a.attempts || 0),
           answered: Object.keys(answers).length, detail,
         };
       });
-    res.json({ ok: true, test: { id: t.id, title: t.title, feedback: t.feedback !== "0", showScore: t.showScore !== "0" }, assignments: rows });
+    res.json({ ok: true, test: { id: t.id, title: t.title, feedback: flagOn(t.feedback), showScore: flagOn(t.showScore),
+      noCopy: flagOn(t.noCopy), maxAttempts: clampInt(t.maxAttempts, 1, 10) }, assignments: rows });
   } catch (e) { res.status(500).json({ ok: false, error: "results failed" }); }
 });
 
 /** Отменить попытку ученика: скрыть из кабинета и погасить ссылку (например, отправили не тому) */
+app.get("/api/admin/tests/:id", needAdmin, async (req, res) => {
+  try {
+    const tests = await tbl.list("Tests");
+    const t = tests.find((x) => String(x.id) === String(req.params.id));
+    if (!t) return res.status(404).json({ ok: false, error: "Тест не найден" });
+    let questions = [];
+    try { questions = JSON.parse(t.questions || "[]"); } catch (e) {}
+    res.json({ ok: true, test: {
+      id: t.id, title: t.title, questions, count: questions.length,
+      feedback: flagOn(t.feedback), showScore: flagOn(t.showScore), noCopy: flagOn(t.noCopy),
+      maxAttempts: clampInt(t.maxAttempts, 1, 10), created: t.created,
+    } });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "test not loaded" }); }
+});
+/** Изменить сохранённый тест (название, вопросы, настройки — можно по отдельности) */
+
 app.post("/api/admin/tests/cancel", needAdmin, async (req, res) => {
   const id = String((req.body || {}).id || "");
   try {
     const a = (await tbl.list("TestAssign")).find((x) => String(x.id) === id);
     if (!a) return res.status(404).json({ ok: false, error: "Попытка не найдена" });
-    await tbl.update("TestAssign", "id", id, { visible: "0", status: "cancelled", answers: "", score: "", startedAt: "", finishedAt: "" });
+    await tbl.update("TestAssign", "id", id, { visible: "0", status: "cancelled", answers: "", score: "", startedAt: "", finishedAt: "", attempts: "0" });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: "cancel failed" }); }
 });
 
 // --- тест: сторона ученика ---
+/**
+ * Что видит ученик по ссылке. Правильные ответы НЕ уходят до ответа на вопрос.
+ * Флаги читаем через flagOn: в Google Sheets "0" приходит числом 0.
+ */
+function testView(a, tst) {
+  let questions = [];
+  try { questions = JSON.parse((tst && tst.questions) || "[]"); } catch (e) {}
+  const answers = parseAssignAnswers(a);
+  const finished = a.status === "finished";
+  const showScore = flagOn(tst && tst.showScore);
+  const feedback = flagOn(tst && tst.feedback);
+  const maxAttempts = clampInt(tst && tst.maxAttempts, 1, 10);
+  const attempts = Math.max(0, +a.attempts || 0);
+  const answeredMap = {};
+  for (const k of Object.keys(answers)) answeredMap[k] = feedback ? { ok: !!answers[k].ok } : {};
+  return {
+    ok: true, title: tst.title, student: a.name || "", count: questions.length,
+    feedback, showScore, noCopy: flagOn(tst && tst.noCopy),
+    maxAttempts, attempts, canRetry: finished && attempts < maxAttempts,
+    status: finished ? "finished" : (Object.keys(answers).length ? "started" : "assigned"),
+    answered: Object.keys(answers).length,
+    answeredMap,
+    score: finished && showScore ? (+a.score || 0) : null,
+    // вопросы БЕЗ правильных ответов — они не уходят на клиент, пока не получен ответ
+    questions: finished ? [] : questions.map((q) => ({ type: q.type, text: q.text, options: q.options || [], multi: !!q.multi })),
+  };
+}
+/** В проде (Google Sheets) читаем тест одним запросом к Apps Script (testLoad) —
+ *  это в 2 раза быстрее, чем два отдельных tblList. Старая версия Code.gs не знает
+ *  action — тогда тихо откатываемся на обычный путь. */
+async function testLoadRemote(token) {
+  const data = await appsScript("testLoad", { token }, "POST");
+  if (!data || data.error === "unknown action") return null;
+  return data;
+}
+async function testAnswerRemote(token, qi, answer) {
+  const data = await appsScript("testAnswer", { token, qi, answer }, "POST");
+  if (!data || data.error === "unknown action") return null;
+  return data;
+}
+
 app.get("/api/test", async (req, res) => {
   const t = String(req.query.t || "");
   try {
+    if (APPS_SCRIPT_URL) {
+      const remote = await testLoadRemote(t);
+      if (remote) return res.status(remote.ok ? 200 : 404).json(remote);
+    }
     const assigns = await tbl.list("TestAssign");
     const a = assigns.find((x) => String(x.id) === t);
-    if (!a || a.visible === "0") return res.status(404).json({ ok: false, error: "Тест не найден. Попросите преподавателя прислать новую ссылку." });
+    if (!a || !flagOn(a.visible)) return res.status(404).json({ ok: false, error: "Тест не найден. Попросите преподавателя прислать новую ссылку." });
     const tests = await tbl.list("Tests");
     const tst = tests.find((x) => String(x.id) === String(a.testId));
     if (!tst) return res.status(404).json({ ok: false, error: "Тест удалён" });
-    let questions = [];
-    try { questions = JSON.parse(tst.questions || "[]"); } catch (e) {}
-    const answers = parseAssignAnswers(a);
-    const finished = a.status === "finished";
-    const showScore = tst.showScore !== "0";
-    const feedback = tst.feedback !== "0";
-    // что уже отвечено (без раскрытия правильности, если обратная связь выключена)
-    const answeredMap = {};
-    for (const k of Object.keys(answers)) answeredMap[k] = feedback ? { ok: !!answers[k].ok } : {};
-    res.json({
-      ok: true, title: tst.title, student: a.name || "", count: questions.length,
-      feedback, showScore,
-      status: finished ? "finished" : (Object.keys(answers).length ? "started" : "assigned"),
-      answered: Object.keys(answers).length,
-      answeredMap,
-      score: finished && showScore ? +a.score : null,
-      // вопросы БЕЗ правильных ответов — они не уходят на клиент, пока не получен ответ
-      questions: finished ? [] : questions.map((q) => ({ type: q.type, text: q.text, options: q.options || [], multi: !!q.multi })),
-    });
+    res.json(testView(a, tst));
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "test failed" }); }
 });
 app.post("/api/test/answer", async (req, res) => {
   const b = req.body || {};
   const t = String(b.t || ""), qi = Number(b.qi);
   try {
+    if (APPS_SCRIPT_URL) {
+      const remote = await testAnswerRemote(t, qi, b.answer);
+      if (remote) return res.status(remote.ok ? 200 : 409).json(remote);
+    }
     const assigns = await tbl.list("TestAssign");
     const a = assigns.find((x) => String(x.id) === t);
-    if (!a || a.visible === "0") return res.status(404).json({ ok: false, error: "Тест не найден" });
+    if (!a || !flagOn(a.visible)) return res.status(404).json({ ok: false, error: "Тест не найден" });
     if (a.status === "finished") return res.status(409).json({ ok: false, error: "Тест уже пройден" });
     const tests = await tbl.list("Tests");
     const tst = tests.find((x) => String(x.id) === String(a.testId));
@@ -1387,12 +1579,14 @@ app.post("/api/test/answer", async (req, res) => {
       answers: JSON.stringify(answers), status: "started",
       ...(started ? { startedAt: new Date().toISOString() } : {}),
     });
-    const feedback = tst && tst.feedback !== "0";
-    const out = { ok: true, correct: feedback ? ok : undefined, answeredCount: Object.keys(answers).length };
+    const feedback = tst && flagOn(tst.feedback);
+    const out = { ok: true, answeredCount: Object.keys(answers).length };
     if (feedback) {
+      out.correct = ok;
       out.correctAnswer = q.type === "input" ? q.answer : q.correct;
-      if (q.explanation) out.explanation = q.explanation;
     }
+    // пояснение показываем всегда, если оно у вопроса есть (и при верном, и при неверном ответе)
+    if (q.explanation) out.explanation = q.explanation;
     res.json(out);
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "answer failed" }); }
 });
@@ -1401,21 +1595,48 @@ app.post("/api/test/finish", async (req, res) => {
   try {
     const assigns = await tbl.list("TestAssign");
     const a = assigns.find((x) => String(x.id) === t);
-    if (!a || a.visible === "0") return res.status(404).json({ ok: false, error: "Тест не найден" });
+    if (!a || !flagOn(a.visible)) return res.status(404).json({ ok: false, error: "Тест не найден" });
     const tests = await tbl.list("Tests");
     const tst = tests.find((x) => String(x.id) === String(a.testId));
     let questions = [];
     try { questions = JSON.parse((tst && tst.questions) || "[]"); } catch (e) {}
-    const showScore = tst && tst.showScore !== "0";
+    const showScore = tst && flagOn(tst.showScore);
+    const maxAttempts = clampInt(tst && tst.maxAttempts, 1, 10);
     if (a.status === "finished") {
-      return res.json({ ok: true, finished: true, total: questions.length, score: showScore ? +a.score : null, showScore });
+      const attempts = Math.max(0, +a.attempts || 0);
+      return res.json({ ok: true, finished: true, total: questions.length, score: showScore ? (+a.score || 0) : null,
+        showScore, attempts, maxAttempts, canRetry: attempts < maxAttempts });
     }
     const answers = parseAssignAnswers(a);
     const score = questions.reduce((s, q, i) => s + (answers[i] && answers[i].ok ? 1 : 0), 0);
-    await tbl.update("TestAssign", "id", t, { status: "finished", score: String(score), total: String(questions.length), finishedAt: new Date().toISOString() });
-    notifyAdmin(`📝 Тест «${a.title}» завершён\n👤 ${a.name || ""} 📞 ${a.phone}\nРезультат: ${score} из ${questions.length}`);
-    res.json({ ok: true, finished: true, total: questions.length, score: showScore ? score : null, showScore });
+    const attempts = Math.max(0, +a.attempts || 0) + 1;
+    const final = attempts >= maxAttempts;
+    await tbl.update("TestAssign", "id", t, {
+      status: "finished", score: String(score), total: String(questions.length),
+      attempts: String(attempts), finishedAt: new Date().toISOString(),
+    });
+    notifyAdmin(`📝 Тест «${a.title}» ${final ? "пройден" : `завершён (попытка ${attempts} из ${maxAttempts}, можно ещё)`}\n👤 ${a.name || ""} 📞 ${a.phone}\nРезультат: ${score} из ${questions.length}`);
+    res.json({ ok: true, finished: true, total: questions.length, score: showScore ? score : null,
+      showScore, attempts, maxAttempts, canRetry: !final });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "finish failed" }); }
+});
+/** Повторная попытка: очищает ответы и возвращает тест (если лимит попыток не исчерпан) */
+app.post("/api/test/retry", async (req, res) => {
+  const t = String((req.body || {}).t || "");
+  try {
+    const assigns = await tbl.list("TestAssign");
+    const a = assigns.find((x) => String(x.id) === t);
+    if (!a || !flagOn(a.visible)) return res.status(404).json({ ok: false, error: "Тест не найден" });
+    const tests = await tbl.list("Tests");
+    const tst = tests.find((x) => String(x.id) === String(a.testId));
+    if (!tst) return res.status(404).json({ ok: false, error: "Тест удалён" });
+    const maxAttempts = clampInt(tst.maxAttempts, 1, 10);
+    const attempts = Math.max(0, +a.attempts || 0);
+    if (a.status !== "finished" || attempts >= maxAttempts)
+      return res.status(409).json({ ok: false, error: "Повторное прохождение недоступно" });
+    await tbl.update("TestAssign", "id", t, { answers: "", status: "assigned", score: "", startedAt: "" });
+    res.json(testView({ ...a, answers: "", status: "assigned", score: "" }, tst));
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "retry failed" }); }
 });
 
 // ---------- static ----------

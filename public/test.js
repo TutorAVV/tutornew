@@ -1,11 +1,12 @@
 /* Страница теста для ученика (/test.html?t=…).
    Правильные ответы приходят с сервера только после ответа на вопрос
-   и только если преподаватель включил обратную связь. Ответить можно один раз. */
+   и только если преподаватель включил обратную связь.
+   Количество попыток — настройка теста (по умолчанию одна).
+   Заголовок теста — над блоком, ФИО ученика — под ним (меньше). */
 (function () {
   "use strict";
   const $ = (s) => document.querySelector(s);
-  const qs = new URLSearchParams(location.search);
-  const token = qs.get("t") || "";
+  const token = new URLSearchParams(location.search).get("t") || "";
 
   const KEY_LETTERS = "абвгдежзи";
 
@@ -26,19 +27,42 @@
     btn.onclick = () => { document.body.classList.toggle("dark"); localStorage.setItem("theme", document.body.classList.contains("dark") ? "dark" : "light"); paint(); };
   }
 
+  function applyNoCopy() {
+    if (!T || !T.noCopy) return;
+    document.body.classList.add("no-copy");
+    ["copy", "cut", "contextmenu", "selectstart", "dragstart"].forEach((ev) =>
+      document.addEventListener(ev, (e) => {
+        const t = e.target;
+        if (t && t.closest && t.closest("#quiz .quiz-input, input, textarea")) return;
+        e.preventDefault();
+      }, true));
+  }
+
+  function headerMeta() {
+    const parts = [];
+    if (T) {
+      parts.push(`вопросов: ${T.count}`);
+      if (T.maxAttempts > 1) parts.push(`попытка ${Math.min(T.attempts + (T.status === "finished" ? 0 : 1), T.maxAttempts)} из ${T.maxAttempts}`);
+    }
+    $("#tMeta").textContent = parts.join(" · ");
+  }
+
   async function load() {
-    if (!token) return renderError("Ссылка на тест неполная — попросите преподавателя прислать её заново.");
+    if (!token) return renderError("Ссылка на тест неполная — попросите её прислать заново.");
     try {
       const r = await fetch(`/api/test?t=${encodeURIComponent(token)}`);
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || "Тест не найден");
       T = d;
       answered = d.answeredMap || {};
-      $("#logoName").textContent = "Онлайн-уроки";
-      document.title = `${d.title} — тест`;
-      if (d.status === "finished") return renderFinish(true);
+      document.title = `${T.title} — тест`;
+      $("#tTitle").textContent = T.title;
+      if (T.student) { $("#tName").textContent = T.student; $("#tName").classList.remove("hidden"); }
+      applyNoCopy();
+      headerMeta();
+      if (T.status === "finished") return renderFinish(true);
       cur = firstUnanswered();
-      if (cur >= d.count) return finish();
+      if (cur >= T.count) return finish();
       renderQuestion();
     } catch (e) { renderError(e.message); }
   }
@@ -50,7 +74,7 @@
 
   function renderError(msg) {
     $("#quiz").innerHTML = `
-      <div class="panel-lite center">
+      <div class="panel-center">
         <div style="font-size:44px">😕</div>
         <h3>Не получилось открыть тест</h3>
         <p class="muted">${esc(msg)}</p>
@@ -75,18 +99,16 @@
       if (q.multi) body += `<div class="muted-sm" style="margin-top:8px">Вопрос с несколькими правильными ответами — отметьте все подходящие варианты.</div>`;
     }
     $("#quiz").innerHTML = `
-      <div class="panel-lite">
-        <div class="muted-sm">${esc(T.title)}${T.student ? " · " + esc(T.student) : ""} · вопрос ${cur + 1} из ${total}</div>
-        <div class="quiz-progress"><i style="width:${prog}%"></i></div>
-        <div class="quiz-q">${esc(q.text)}</div>
-        ${body}
-        <div id="qFb"></div>
-        <div class="hero-btns" style="margin:16px 0 0">
-          <button class="btn btn-primary btn-lg" id="qAnswer" ${canAnswer() ? "" : "disabled"}>Ответить</button>
-          <button class="btn btn-ghost btn-lg hidden" id="qNext"></button>
-        </div>
-        <div class="form-err" id="qErr"></div>
-      </div>`;
+      <div class="muted-sm">${esc(T.title)}${T.student ? " · " + esc(T.student) : ""} · вопрос ${cur + 1} из ${total}</div>
+      <div class="quiz-progress"><i style="width:${prog}%"></i></div>
+      <div class="quiz-q">${esc(q.text)}</div>
+      ${body}
+      <div id="qFb"></div>
+      <div class="hero-btns" style="margin:16px 0 0">
+        <button class="btn btn-primary btn-lg" id="qAnswer" ${canAnswer() ? "" : "disabled"}>Ответить</button>
+        <button class="btn btn-ghost btn-lg hidden" id="qNext"></button>
+      </div>
+      <div class="form-err" id="qErr"></div>`;
     if (q.type === "input") {
       const inp = $("#qInput");
       inp.addEventListener("input", () => { inputVal = inp.value; $("#qAnswer").disabled = !inp.value.trim(); });
@@ -123,6 +145,7 @@
     const btn = $("#qAnswer");
     btn.disabled = true; btn.textContent = "Проверяем… ⏳";
     $("#qErr").textContent = "";
+    document.querySelectorAll(".quiz-opt").forEach((b) => b.classList.add("locked"));
     try {
       const r = await fetch("/api/test/answer", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -132,7 +155,6 @@
       if (!d.ok) throw new Error(d.error || "Не получилось отправить ответ");
       answered[cur] = d.correct === undefined ? {} : { ok: d.correct };
       locked = true;
-      document.querySelectorAll(".quiz-opt").forEach((b) => b.classList.add("locked"));
       const next = firstUnanswered();
       const isLast = next >= T.count;
       if (T.feedback) showFeedback(d, q);
@@ -149,6 +171,7 @@
     } catch (e) {
       $("#qErr").textContent = e.message;
       btn.disabled = false; btn.textContent = "Ответить";
+      document.querySelectorAll(".quiz-opt").forEach((b) => b.classList.remove("locked"));
     }
   }
 
@@ -160,7 +183,7 @@
       else html += `<br>Правильный ответ: <b>${esc(markCorrect(q, d.correctAnswer))}</b>`;
     }
     html += `</div>`;
-    if (d.explanation) html += `<div class="muted-sm" style="margin-bottom:10px">💡 ${esc(d.explanation)}</div>`;
+    if (d.explanation) html += `<div class="quiz-expl muted-sm">💡 ${esc(d.explanation)}</div>`;
     $("#qFb").innerHTML = html;
     // подсветим варианты
     if (q.type !== "input") {
@@ -178,48 +201,74 @@
   }
 
   async function finish() {
-    try {
-      const r = await fetch("/api/test/finish", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ t: token }),
-      });
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error || "Ошибка");
-      renderFinish(false, d);
-    } catch (e) {
-      $("#quiz").innerHTML = `<div class="panel-lite center"><p class="form-err">${esc(e.message)}</p>
+    const r0 = await fetch("/api/test/finish", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ t: token }),
+    });
+    const d = await r0.json().catch(() => ({}));
+    if (!d.ok) {
+      $("#quiz").innerHTML = `<div class="panel-center"><p class="form-err">${esc(d.error || "Ошибка")}</p>
         <button class="btn btn-primary" onclick="location.reload()">Попробовать снова</button></div>`;
+      return;
     }
+    T.status = "finished";
+    T.score = d.score;
+    T.canRetry = !!d.canRetry;
+    T.attempts = d.attempts != null ? d.attempts : T.attempts;
+    T.maxAttempts = d.maxAttempts != null ? d.maxAttempts : T.maxAttempts;
+    headerMeta();
+    renderFinish(false);
   }
 
-  function renderFinish(already, d) {
-    const showScore = already ? T.showScore : (d ? d.showScore : T.showScore);
-    const score = already ? T.score : (d ? d.score : null);
+  function renderFinish(already) {
+    const showScore = T.showScore;
     let res;
-    if (showScore) {
-      const s = score == null ? "?" : score;
+    if (showScore && T.score != null) {
+      const s = T.score;
       const pct = T.count ? Math.round((s / T.count) * 100) : 0;
       res = `<div class="quiz-result-num">${s} <span class="muted" style="font-size:22px">из ${T.count}</span></div>
         <p class="muted">${pct >= 80 ? "Отличный результат! 🌟" : pct >= 50 ? "Хорошо, есть куда расти 💪" : "Стоит повторить тему — разберём на занятии 📚"}</p>`;
     } else {
       res = `<div style="font-size:44px">📨</div><p>Ответы отправлены преподавателю.<br>Результат вы узнаете на занятии или в кабинете.</p>`;
     }
+    const retryBtn = T.canRetry
+      ? `<button class="btn btn-primary" id="btnRetry">🔁 Ещё попытка (${T.attempts} из ${T.maxAttempts})</button>`
+      : "";
     $("#quiz").innerHTML = `
-      <div class="panel-lite center">
-        <h2>Тест «${esc(T.title)}» ${already ? "" : "пройден"} ${already ? "✅" : "🏁"}</h2>
+      <div class="panel-center">
+        <h2>Тест пройден ${already ? "" : "🏁"}</h2>
         ${res}
-        <div class="hero-btns center" style="justify-content:center">
-          <a class="btn btn-primary" href="/cabinet.html">← В кабинет ученика</a>
+        ${retryBtn}
+        <div class="hero-btns" style="justify-content:center">
+          <a class="btn ${retryBtn ? "btn-ghost" : "btn-primary"}" href="/cabinet.html">← В кабинет ученика</a>
           <a class="btn btn-ghost" href="/">На главную</a>
         </div>
       </div>`;
+    const rb = $("#btnRetry");
+    if (rb) rb.onclick = doRetry;
+  }
+
+  async function doRetry() {
+    $("#quiz").innerHTML = `<div class="muted">Начинаем новую попытку… ⏳</div>`;
+    const r = await fetch("/api/test/retry", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ t: token }),
+    });
+    const d = await r.json();
+    if (!d.ok) { alert(d.error || "Не удалось начать новую попытку"); return load(); }
+    T = d;
+    answered = T.answeredMap || {};
+    locked = false; selected = []; inputVal = "";
+    headerMeta();
+    cur = firstUnanswered();
+    renderQuestion();
   }
 
   function init() {
     initTheme();
     $("#year").textContent = new Date().getFullYear();
     fetch("/api/config").then((r) => r.json()).then((cfg) => {
-      if (cfg.tutorName) { $("#logoName").textContent = cfg.tutorName; $("#footName").textContent = cfg.tutorName; document.title = `${cfg.tutorName} — тест`; }
+      if (cfg.tutorName) { $("#logoName").textContent = cfg.tutorName; $("#footName").textContent = cfg.tutorName; }
     }).catch(() => {});
     load();
   }
