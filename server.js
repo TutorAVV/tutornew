@@ -523,8 +523,18 @@ app.post("/api/reschedule", async (req, res) => {
     let chatId = "";
     if (APPS_SCRIPT_URL) {
       const data = await appsScript("rescheduleBooking", { id, phone, date, time }, "POST");
-      if (!data.ok) return res.status(409).json(data);
-      chatId = data.chatId || "";
+      if (!data || !data.ok) {
+        // Бывает, что слоты уже переставлены, а запись в Bookings не обновилась
+        // (типизированные колонки в таблице). Проверяем реальное состояние и,
+        // если перенос всё же прошёл, не показываем ученику ложную ошибку.
+        let moved = false;
+        try {
+          const after = (await activeBookings(phone)).find((x) => String(x.id) === String(id));
+          moved = !!after && after.iso === date && after.time === time;
+        } catch (e2) { console.error("reschedule verify:", e2.message); }
+        if (!moved) return res.status(409).json({ ok: false, error: (data && data.error) || "Не получилось перенести, попробуйте ещё раз" });
+      }
+      chatId = (data && data.chatId) || "";
     } else {
       const db = loadDb();
       const b = db.bookings.find((x) => x.id === id && samePhone(x.phone, phone));

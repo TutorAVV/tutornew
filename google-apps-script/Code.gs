@@ -352,10 +352,17 @@ function rescheduleBooking_(p) {
     sh.getRange(target.row, cm.reminded + 1).setValue("");
     // освободить старый
     freeSlotRow_(oldDate, oldTime);
-    // обновить заявку
-    writeText_(bh, i + 2, bm.date, newDate);
-    writeText_(bh, i + 2, bm.time, newTime);
-    if ("status" in bm && st !== "confirmed") bh.getRange(i + 2, bm.status + 1).setValue("new");
+    // обновить заявку (дата/время). Колонка может быть «типизированной» (дата/время) —
+    // пишем максимально устойчиво и проверяем, что значение реально записалось.
+    var wroteDate = writeDateCell_(bh, i + 2, bm.date, newDate);
+    var wroteTime = writeTimeCell_(bh, i + 2, bm.time, newTime);
+    if ("status" in bm && st !== "confirmed") {
+      try { bh.getRange(i + 2, bm.status + 1).setValue("new"); } catch (eSt) {}
+    }
+    SpreadsheetApp.flush();
+    if (!wroteDate || !wroteTime) {
+      return { ok: false, error: "Не удалось обновить дату в заявке — проверьте формат колонок date/time на листе Bookings" };
+    }
 
     notify_("🔁 Ученик перенёс занятие\n👤 " + name + " 📞 " + phone +
       "\n📅 Было: " + oldDate + " в " + oldTime + "\n📅 Стало: " + newDate + " в " + newTime);
@@ -519,6 +526,47 @@ function writeText_(sh, row, colIdx, val) {
   var rng = sh.getRange(row, colIdx + 1);
   try { rng.setNumberFormat("@"); } catch (e) { /* typed column — пропускаем */ }
   rng.setValue(val);
+}
+
+/**
+ * Записать ДАТУ в ячейку так, чтобы получилось при любом типе колонки.
+ * Сначала пробуем текст "ДД.ММ.ГГГГ", а если колонка типизирована как дата
+ * (Sheets молча превращает текст в пустоту/мусор) — пишем настоящий Date.
+ * Возвращает true, если после записи normDate_ читает ожидаемое значение.
+ */
+function writeDateCell_(sh, row, colIdx, dateDsp) {
+  if (colIdx == null || colIdx < 0) return false;
+  var rng = sh.getRange(row, colIdx + 1);
+  var parts = parseDsp_(dateDsp);
+  var attempts = [
+    function () { try { rng.setNumberFormat("@"); } catch (e) {} rng.setValue(dateDsp); },
+    function () { if (!parts) return; try { rng.setNumberFormat("dd.MM.yyyy"); } catch (e) {} rng.setValue(new Date(parts.y, parts.m - 1, parts.d)); },
+    function () { rng.setValue(dateDsp); }
+  ];
+  for (var a = 0; a < attempts.length; a++) {
+    try { attempts[a](); } catch (e) { continue; }
+    SpreadsheetApp.flush();
+    if (normDate_(rng.getValue()) === dateDsp) return true;
+  }
+  return normDate_(rng.getValue()) === dateDsp;
+}
+
+/** Записать ВРЕМЯ "HH:mm" при любом типе колонки (текст / время). */
+function writeTimeCell_(sh, row, colIdx, timeStr) {
+  if (colIdx == null || colIdx < 0) return false;
+  var rng = sh.getRange(row, colIdx + 1);
+  var hm = String(timeStr).split(":");
+  var attempts = [
+    function () { try { rng.setNumberFormat("@"); } catch (e) {} rng.setValue(timeStr); },
+    function () { try { rng.setNumberFormat("HH:mm"); } catch (e) {} rng.setValue(new Date(1899, 11, 30, +hm[0], +hm[1])); },
+    function () { rng.setValue(timeStr); }
+  ];
+  for (var a = 0; a < attempts.length; a++) {
+    try { attempts[a](); } catch (e) { continue; }
+    SpreadsheetApp.flush();
+    if (normTime_(rng.getValue()) === timeStr) return true;
+  }
+  return normTime_(rng.getValue()) === timeStr;
 }
 
 /** Добавить сразу несколько строк слотов (быстро, без setNumberFormat на каждую ячейку) */

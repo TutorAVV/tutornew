@@ -54,6 +54,7 @@
           <option value="booked">занятые</option><option value="closed">закрытые</option>
         </select>
         <button class="mini-btn" id="schLoad">Показать</button>
+        <button class="mini-btn" id="schCal">📅 Календарь</button>
         <button class="mini-btn" id="schCsv">⬇ CSV</button>
       </div>
       <div class="toolbar">
@@ -63,7 +64,22 @@
         <button class="mini-btn" id="clrClose">Закрыть</button>
         <button class="mini-btn danger" id="clrDelete">Удалить</button>
       </div>
-      <div id="schDays"><div class="muted">Нажмите «Показать» — календарь и расписание на выбранный период появятся ниже.</div></div>
+      <div id="schDays"><div class="muted">Нажмите «Показать» — расписание на выбранный период появится ниже. Кнопка «📅 Календарь» покажет тот же период месяцем.</div></div>
+
+      <!-- Календарь расписания (pop-up) -->
+      <div class="modal hidden" id="calModal">
+        <div class="modal-card modal-card-wide">
+          <div class="modal-head">
+            <h3 style="margin:0">📅 Календарь расписания</h3>
+            <button class="mini-btn" id="calClose" title="Закрыть">✕</button>
+          </div>
+          <div id="calModalBody"></div>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="calGoDay">Перейти к дню в списке</button>
+            <button class="btn btn-primary btn-sm" id="calDone">Готово</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- BOOKINGS -->

@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const $ = (s) => document.querySelector(s);
-  const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const $$ = (s, root) => Array.from((root || document).querySelectorAll(s));
   const key = () => sessionStorage.getItem("adminKey") || "";
   const H = () => ({ "Content-Type": "application/json", "x-admin-key": key() });
   let bookings = [], schedule = [], students = [], tgUsers = [], curStudent = null, curChat = null, settingsMeta = [], settingsDefaults = {};
@@ -114,8 +114,8 @@
     if (!rows.length) { box.innerHTML = `<div class="muted">Слотов нет — добавьте во вкладке «Слоты»</div>`; return; }
     const days = {};
     for (const s of rows) (days[s.iso] = days[s.iso] || []).push(s);
-    const cal = renderAdminCalendar(days);
-    box.innerHTML = cal + Object.keys(days).sort().map((iso) => {
+    // Список по дням (как раньше). Календарь — отдельным pop-up по кнопке «Календарь».
+    box.innerHTML = Object.keys(days).sort().map((iso) => {
       const list = days[iso];
       const busy = list.filter((s) => s.status === "booked").length, free = list.filter((s) => s.status === "open").length;
       const selected = iso === schCalSel ? " selected" : "";
@@ -123,7 +123,7 @@
         <div class="day-head"><b>${esc(dayTitle(iso))}</b>
           <span class="muted-sm">${free ? `свободно ${free}` : ""}${free && busy ? " · " : ""}${busy ? `занято ${busy}` : ""}</span></div>
         <table class="tbl tbl-day">
-          <thead><tr><th style="width:70px">Время</th><th style="width:60px">Длит.</th><th style="width:100px">Статус</th><th>Ученик</th><th>Действие</th></tr></thead>
+          <thead><tr><th style="width:70px">Время</th><th style="width:60px">Длит.</th><th style="width:100px">Статус</th><th>Ученик</th><th class="col-act">Действие</th></tr></thead>
           <tbody>${list.map((s) => {
             const who = s.student
               ? `<b>${esc(s.student)}</b>${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ""}${s.subject ? ` <span class="muted-sm">· ${esc(s.subject)}</span>` : ""}${s.email ? `<br><span class="muted-sm">${esc(s.email)}</span>` : ""}`
@@ -137,59 +137,66 @@
               <td><b>${esc(s.time)}</b></td><td>${esc(s.duration)}</td>
               <td><span class="pill p-${s.status === "open" ? "free" : s.status === "booked" ? "busy" : "cancelled"}">${SL_RU[s.status] || s.status}</span></td>
               <td>${who}</td>
-              <td><div class="rowbtns">${acts}<button class="mini-btn danger" data-del="${s.iso}|${s.time}" title="Удалить слот">✕</button></div></td>
+              <td class="col-act"><div class="rowbtns">${acts}<button class="mini-btn danger" data-del="${s.iso}|${s.time}" title="Удалить слот">✕</button></div></td>
             </tr>`;
           }).join("")}</tbody>
         </table>
       </div>`;
     }).join("");
-    $$("#schDays [data-free]").forEach((b) => b.onclick = () => freeBooked(b.dataset.free));
-    $$("#schDays [data-close]").forEach((b) => b.onclick = () => setSlotState(b.dataset.close, "closed"));
-    $$("#schDays [data-open]").forEach((b) => b.onclick = () => setSlotState(b.dataset.open, "open"));
-    $$("#schDays [data-del]").forEach((b) => b.onclick = () => delSlot(b.dataset.del));
-    $$("#schDays [data-cal-day]").forEach((b) => b.onclick = () => {
-      schCalSel = b.dataset.calDay;
-      renderSchedule();
-      const target = $("#day-" + schCalSel);
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    $$("#schDays [data-cal-nav]").forEach((b) => b.onclick = () => {
-      schCalMonth = new Date(schCalMonth.getFullYear(), schCalMonth.getMonth() + (+b.dataset.calNav), 1);
-      renderSchedule();
-    });
-    $$("#schDays [data-cal-today]").forEach((b) => b.onclick = () => {
-      const d = new Date(); schCalMonth = new Date(d.getFullYear(), d.getMonth(), 1); schCalSel = isoToday(0); renderSchedule();
-    });
+    bindScheduleActions(box);
   }
-  function renderAdminCalendar(days) {
-    if (!schCalMonth) { const d = new Date(); schCalMonth = new Date(d.getFullYear(), d.getMonth(), 1); schCalSel = isoToday(0); }
-    const y = schCalMonth.getFullYear(), m = schCalMonth.getMonth();
-    const firstDow = (new Date(y, m, 1).getDay() + 6) % 7;
-    const daysInMonth = new Date(y, m + 1, 0).getDate();
-    const p = (n) => String(n).padStart(2, "0");
-    const title = schCalMonth.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
-    let cells = "";
-    for (let i = 0; i < firstDow; i++) cells += `<div class="admin-cal-cell off"></div>`;
-    for (let d = 1; d <= daysInMonth; d++) {
-      const ds = `${y}-${p(m + 1)}-${p(d)}`;
-      const list = (days[ds] || []).filter((s) => s.status === "booked");
-      const today = isoToday(0) === ds ? " today" : "";
-      cells += `<div class="admin-cal-cell${ds === schCalSel ? " sel" : ""}${today}" data-cal-day="${ds}">
-        <span class="cal-num">${d}</span>
-        <span class="admin-cal-chips">${list.slice(0, 2).map((s) => `<span class="admin-cal-chip" title="${esc(s.time)} ${esc(s.student || "")}">${esc(s.time)} ${esc(s.student || "—")}</span>`).join("")}${list.length > 2 ? `<span class="admin-cal-more">+${list.length - 2}</span>` : ""}</span>
-      </div>`;
-    }
-    return `<div class="admin-cal">
-      <div class="admin-cal-head">
-        <button class="mini-btn" data-cal-nav="-1" title="Предыдущий месяц">‹</button>
-        <b>${esc(title)}</b>
-        <button class="mini-btn" data-cal-nav="1" title="Следующий месяц">›</button>
-        <button class="mini-btn" data-cal-today="">Сегодня</button>
-        <span class="muted-sm">Кликните день, чтобы посмотреть, кто будет</span>
-      </div>
-      <div class="admin-cal-weekdays"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>
-      <div class="admin-cal-grid">${cells}</div>
-    </div>`;
+
+  /** Обработчики кнопок слотов — работают и в списке, и в pop-up календаре */
+  function bindScheduleActions(root) {
+    $$("[data-free]", root).forEach((b) => b.onclick = () => freeBooked(b.dataset.free));
+    $$("[data-close]", root).forEach((b) => b.onclick = () => setSlotState(b.dataset.close, "closed"));
+    $$("[data-open]", root).forEach((b) => b.onclick = () => setSlotState(b.dataset.open, "open"));
+    $$("[data-del]", root).forEach((b) => b.onclick = () => delSlot(b.dataset.del));
+  }
+
+  // ---------- календарь расписания: pop-up по кнопке «Календарь» ----------
+  function scheduleDaysMap() {
+    const f = $("#schStatus").value;
+    const days = {};
+    for (const s of schedule.filter((x) => !f || x.status === f)) (days[s.iso] = days[s.iso] || []).push(s);
+    return days;
+  }
+  function openSchCalendar() {
+    const modal = $("#calModal");
+    if (!modal) return;
+    if (!schedule.length) { toast("Сначала нажмите «Показать» — загрузим расписание", "err"); return; }
+    modal.classList.remove("hidden");
+    renderSchCalendarModal();
+  }
+  function closeSchCalendar() {
+    const modal = $("#calModal");
+    if (modal) modal.classList.add("hidden");
+  }
+  function renderSchCalendarModal() {
+    const body = $("#calModalBody");
+    if (!body) return;
+    body.innerHTML = renderAdminCalendar(scheduleDaysMap());
+    $$("#calModalBody [data-cal-day]").forEach((b) => b.onclick = () => {
+      schCalSel = b.dataset.calDay;
+      renderSchCalendarModal();
+      renderSchedule();
+    });
+    $$("#calModalBody [data-cal-nav]").forEach((b) => b.onclick = () => {
+      schCalMonth = new Date(schCalMonth.getFullYear(), schCalMonth.getMonth() + (+b.dataset.calNav), 1);
+      renderSchCalendarModal();
+    });
+    $$("#calModalBody [data-cal-today]").forEach((b) => b.onclick = () => {
+      const d = new Date(); schCalMonth = new Date(d.getFullYear(), d.getMonth(), 1); schCalSel = isoToday(0);
+      renderSchCalendarModal(); renderSchedule();
+    });
+    // «Перейти к дню» — закрыть календарь и прокрутить к карточке дня в списке
+    const go = $("#calGoDay");
+    if (go) go.onclick = () => {
+      closeSchCalendar();
+      const target = schCalSel && $("#day-" + schCalSel);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      else toast("На этот день слотов нет", "err");
+    };
   }
 
   function splitDT(v) { const [date, time] = v.split("|"); return { date, time }; }
@@ -665,7 +672,7 @@
         <textarea id="apText" rows="10" style="width:100%;margin-top:8px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:monospace;font-size:12.5px" readonly></textarea>
         <div class="toolbar" style="margin-top:8px">
           <button class="btn btn-primary btn-sm" id="apCopy">📋 Скопировать промпт</button>
-          <span class="muted-sm">Ответ ИИ вставьте в поле «Текст теста» выше → «Разобрать». Строки «Ответ:» и «Пояснение:» подхватятся автоматически.</span>
+          <span class="muted-sm">Ответ ИИ вставьте в поле «Текст теста» ниже → «Разобрать». Строки «Ответ:» и «Пояснение:» подхватятся автоматически.</span>
         </div>
       </details>`;
   }
@@ -697,6 +704,7 @@
       <h3 style="margin-top:0">Новый тест</h3>
       <p class="muted-sm">Вставьте тест текстом (из учебника, сайта или от ИИ) или JSON. Понимаются варианты «а) …», «1) …», «- …», ответы после вопроса («Ответ: б») или ключом в конце («Ответы: 1-б, 2-а»), а также открытые вопросы («Ответ: 3,14»).</p>
       <div class="form">
+        ${aiPromptBlock()}
         <label>Текст теста<textarea id="tRaw" rows="12" placeholder="Тест: Сложение дробей
 
 1. Сколько будет 1/2 + 1/3?
@@ -720,7 +728,6 @@
             <label class="chk"><input type="checkbox" id="tNoCopy"> запретить копирование текста</label>
             <label class="chk">попыток: <input type="number" id="tMaxAttempts" value="1" min="1" max="10" style="width:64px;margin:0" title="Сколько раз ученик может пройти тест"></label>
           </div>
-          ${aiPromptBlock()}
           <div id="tPreview"></div>
           <details style="margin:8px 0">
             <summary class="muted-sm" style="cursor:pointer">Правка в JSON (если предпросмотр не идеален)</summary>
@@ -1075,7 +1082,12 @@
     $("#schFrom").value = isoToday(0);
     $("#schTo").value = oneMonthForward();
     $("#schLoad").onclick = loadSchedule;
-    $("#schStatus").onchange = renderSchedule;
+    $("#schStatus").onchange = () => { renderSchedule(); if (!$("#calModal").classList.contains("hidden")) renderSchCalendarModal(); };
+    $("#schCal").onclick = openSchCalendar;
+    $("#calClose").onclick = closeSchCalendar;
+    $("#calDone").onclick = closeSchCalendar;
+    $("#calModal").onclick = (e) => { if (e.target === $("#calModal")) closeSchCalendar(); };
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSchCalendar(); });
     $("#schCsv").onclick = () => downloadCsv("schedule.csv",
       ["date", "time", "duration", "status", "student", "email", "phone", "subject"], schedule);
     $("#cleanupBtn").onclick = cleanup;
