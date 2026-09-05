@@ -442,7 +442,10 @@ app.post("/api/book", async (req, res) => {
     if (APPS_SCRIPT_URL) {
       const data = await appsScript("book",
         { date, time, subject, name, email, phone, grade, comment, contact, chatId: cid, source }, "POST");
-      if (data && data.ok) { touchStudent({ phone, name, grade, subject, chatId: cid }).catch(() => {}); if (cid) tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`); }
+      if (data && data.ok) {
+        touchStudent({ phone, name, grade, subject, chatId: cid }).catch(() => {});
+        try { if (cid) await tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`); } catch (e) { console.error("book tg:", e.message); }
+      }
       return res.status(data && data.ok ? 200 : 409).json(data);
     }
     const db = loadDb();
@@ -460,8 +463,10 @@ app.post("/api/book", async (req, res) => {
     });
     saveDb(db);
     touchStudent({ phone, name, grade, subject, chatId: cid }).catch(() => {});
-    notifyAdmin(`🆕 Новая заявка\n📚 ${subject}\n📅 ${toDsp(date)} в ${time}\n👤 ${name}\n📞 ${phone}${email ? `\n✉️ ${email}` : ""}${grade ? `\n🎓 ${grade}` : ""}\nИсточник: ${source}`);
-    if (cid) tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    try {
+      notifyAdmin(`🆕 Новая заявка\n📚 ${subject}\n📅 ${toDsp(date)} в ${time}\n👤 ${name}\n📞 ${phone}${email ? `\n✉️ ${email}` : ""}${grade ? `\n🎓 ${grade}` : ""}\nИсточник: ${source}`);
+      if (cid) await tgSend(cid, `✅ Вы записаны: ${subject}, ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    } catch (e) { console.error("book notify:", e.message); }
     res.json({ ok: true, bookingId: id });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "Не получилось записать, попробуйте ещё раз" }); }
 });
@@ -533,10 +538,13 @@ app.post("/api/reschedule", async (req, res) => {
       b.date = date; b.time = time; if (b.status !== "confirmed") b.status = "new";
       chatId = b.chatId || "";
       saveDb(db);
-      notifyAdmin(`🔁 Ученик перенёс занятие\n👤 ${b.name} 📞 ${b.phone}\n📅 Было: ${toDsp(bk.iso)} в ${bk.time}\n📅 Стало: ${toDsp(date)} в ${time}`);
+      try { notifyAdmin(`🔁 Ученик перенёс занятие\n👤 ${b.name} 📞 ${b.phone}\n📅 Было: ${toDsp(bk.iso)} в ${bk.time}\n📅 Стало: ${toDsp(date)} в ${time}`); } catch (e) { console.error("reschedule notify:", e.message); }
     }
-    if (!chatId) { try { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, phone)); if (u) chatId = String(u.chat_id); } catch (e) {} }
-    if (chatId) tgSend(chatId, `🔁 Занятие перенесено: ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    // Перенос уже выполнен — уведомления и поиск чата не должны превращать успех в ошибку.
+    try {
+      if (!chatId) { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, phone)); if (u) chatId = String(u.chat_id); }
+      if (chatId) await tgSend(chatId, `🔁 Занятие перенесено: ${toDsp(date)} в ${time} (${cfg.tzLabel}).`);
+    } catch (e) { console.error("reschedule notify2:", e.message); }
     res.json({ ok: true, date, time });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "Не получилось перенести, попробуйте ещё раз" }); }
 });
