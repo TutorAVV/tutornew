@@ -4,7 +4,8 @@
   "description": "Онлайн-уроки: запись слотами, перенос, Telegram-бот (рассылки, переписка), кабинет ученика, Google Sheets, админка. Render.com (free).",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "playwright test"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -12,5 +13,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2"
   }
 }

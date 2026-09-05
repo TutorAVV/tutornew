@@ -70,18 +70,18 @@
   function renderGuestName() {
     $("#quiz").innerHTML = `
       <div class="panel-center">
-        <div style="font-size:44px">🕊</div>
-        <h3>Тест отправлен «пустому ученику»</h3>
-        <p class="muted">Введите своё ФИО — оно появится у преподавателя в результатах. В общий список учеников сайта вы не добавитесь.</p>
-        <input class="quiz-input" id="guestName" type="text" placeholder="Имя и фамилия" autocomplete="name" style="max-width:380px;text-align:center">
+        <h3>Введите своё ФИО для сохранения результата</h3>
+        <input class="quiz-input" id="guestName" type="text" placeholder="Фамилия Имя Отчество" aria-label="ФИО" autocomplete="name" maxlength="200" style="max-width:380px;text-align:center">
         <button class="btn btn-primary btn-lg" id="guestGo" style="margin-top:12px">Начать тест</button>
         <div class="form-err" id="guestErr"></div>
       </div>`;
-    const inp = $("#guestName");
+    const inp = $("#guestName"), btn = $("#guestGo");
     const go = async () => {
+      if (btn.disabled) return;
       const name = inp.value.trim();
-      if (!name) { $("#guestErr").textContent = "Введите имя"; return; }
-      go.disabled = true; go.textContent = "Сохраняем… ⏳";
+      if (!name) { $("#guestErr").textContent = "Введите своё ФИО"; return; }
+      $("#guestErr").textContent = "";
+      btn.disabled = true; btn.textContent = "Сохраняем… ⏳";
       try {
         const r = await fetch("/api/test/name", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ t: token, name }) });
         const d = await r.json();
@@ -93,9 +93,11 @@
         cur = firstUnanswered();
         if (cur >= T.count) return finish();
         renderQuestion();
-      } catch (e) { $("#guestErr").textContent = e.message; go.disabled = false; go.textContent = "Начать тест"; }
+      } catch (e) { $("#guestErr").textContent = e.message; }
+      finally { btn.disabled = false; btn.textContent = "Начать тест"; }
     };
-    go.onclick = go;
+    btn.onclick = go;
+    inp.addEventListener("input", () => { $("#guestErr").textContent = ""; });
     inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
     inp.focus();
   }
