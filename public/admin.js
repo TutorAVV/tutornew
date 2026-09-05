@@ -7,6 +7,7 @@
   const H = () => ({ "Content-Type": "application/json", "x-admin-key": key() });
   let bookings = [], schedule = [], students = [], tgUsers = [], curStudent = null, curChat = null, settingsMeta = [], settingsDefaults = {};
   let tgTimer = null;
+  let schCalMonth = null, schCalSel = null;
 
   const ST_RU = { new: "Новая", confirmed: "Подтверждена", done: "Завершена", cancelled: "Отменена" };
   const SL_RU = { open: "свободен", booked: "занят", closed: "закрыт" };
@@ -31,7 +32,13 @@
   }
   function isoToday(off) {
     const d = new Date(); d.setDate(d.getDate() + (off || 0));
-    return d.toISOString().slice(0, 10);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function oneMonthForward() {
+    const d = new Date(); d.setMonth(d.getMonth() + 1);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   }
   function fmtTs(ts) {
     if (!ts) return "";
@@ -58,7 +65,6 @@
     if (!key()) { $("#loginErr").textContent = "Введите пароль"; return; }
     $("#loginErr").textContent = "";
     try {
-      await loadSchedule();
       const data = await api("/api/bookings", { headers: H() });
       bookings = data.bookings || [];
       renderBookings();
@@ -108,14 +114,16 @@
     if (!rows.length) { box.innerHTML = `<div class="muted">Слотов нет — добавьте во вкладке «Слоты»</div>`; return; }
     const days = {};
     for (const s of rows) (days[s.iso] = days[s.iso] || []).push(s);
-    box.innerHTML = Object.keys(days).sort().map((iso) => {
+    const cal = renderAdminCalendar(days);
+    box.innerHTML = cal + Object.keys(days).sort().map((iso) => {
       const list = days[iso];
       const busy = list.filter((s) => s.status === "booked").length, free = list.filter((s) => s.status === "open").length;
-      return `<div class="day-card">
+      const selected = iso === schCalSel ? " selected" : "";
+      return `<div class="day-card${selected}" id="day-${esc(iso)}">
         <div class="day-head"><b>${esc(dayTitle(iso))}</b>
           <span class="muted-sm">${free ? `свободно ${free}` : ""}${free && busy ? " · " : ""}${busy ? `занято ${busy}` : ""}</span></div>
         <table class="tbl tbl-day">
-          <thead><tr><th style="width:70px">Время</th><th style="width:60px">Длит.</th><th style="width:100px">Статус</th><th>Ученик</th><th style="width:130px">Действие</th></tr></thead>
+          <thead><tr><th style="width:70px">Время</th><th style="width:60px">Длит.</th><th style="width:100px">Статус</th><th>Ученик</th><th>Действие</th></tr></thead>
           <tbody>${list.map((s) => {
             const who = s.student
               ? `<b>${esc(s.student)}</b>${s.phone ? ` · <a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>` : ""}${s.subject ? ` <span class="muted-sm">· ${esc(s.subject)}</span>` : ""}${s.email ? `<br><span class="muted-sm">${esc(s.email)}</span>` : ""}`
@@ -139,6 +147,49 @@
     $$("#schDays [data-close]").forEach((b) => b.onclick = () => setSlotState(b.dataset.close, "closed"));
     $$("#schDays [data-open]").forEach((b) => b.onclick = () => setSlotState(b.dataset.open, "open"));
     $$("#schDays [data-del]").forEach((b) => b.onclick = () => delSlot(b.dataset.del));
+    $$("#schDays [data-cal-day]").forEach((b) => b.onclick = () => {
+      schCalSel = b.dataset.calDay;
+      renderSchedule();
+      const target = $("#day-" + schCalSel);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    $$("#schDays [data-cal-nav]").forEach((b) => b.onclick = () => {
+      schCalMonth = new Date(schCalMonth.getFullYear(), schCalMonth.getMonth() + (+b.dataset.calNav), 1);
+      renderSchedule();
+    });
+    $$("#schDays [data-cal-today]").forEach((b) => b.onclick = () => {
+      const d = new Date(); schCalMonth = new Date(d.getFullYear(), d.getMonth(), 1); schCalSel = isoToday(0); renderSchedule();
+    });
+  }
+  function renderAdminCalendar(days) {
+    if (!schCalMonth) { const d = new Date(); schCalMonth = new Date(d.getFullYear(), d.getMonth(), 1); schCalSel = isoToday(0); }
+    const y = schCalMonth.getFullYear(), m = schCalMonth.getMonth();
+    const firstDow = (new Date(y, m, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const p = (n) => String(n).padStart(2, "0");
+    const title = schCalMonth.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+    let cells = "";
+    for (let i = 0; i < firstDow; i++) cells += `<div class="admin-cal-cell off"></div>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${y}-${p(m + 1)}-${p(d)}`;
+      const list = (days[ds] || []).filter((s) => s.status === "booked");
+      const today = isoToday(0) === ds ? " today" : "";
+      cells += `<div class="admin-cal-cell${ds === schCalSel ? " sel" : ""}${today}" data-cal-day="${ds}">
+        <span class="cal-num">${d}</span>
+        <span class="admin-cal-chips">${list.slice(0, 2).map((s) => `<span class="admin-cal-chip" title="${esc(s.time)} ${esc(s.student || "")}">${esc(s.time)} ${esc(s.student || "—")}</span>`).join("")}${list.length > 2 ? `<span class="admin-cal-more">+${list.length - 2}</span>` : ""}</span>
+      </div>`;
+    }
+    return `<div class="admin-cal">
+      <div class="admin-cal-head">
+        <button class="mini-btn" data-cal-nav="-1" title="Предыдущий месяц">‹</button>
+        <b>${esc(title)}</b>
+        <button class="mini-btn" data-cal-nav="1" title="Следующий месяц">›</button>
+        <button class="mini-btn" data-cal-today="">Сегодня</button>
+        <span class="muted-sm">Кликните день, чтобы посмотреть, кто будет</span>
+      </div>
+      <div class="admin-cal-weekdays"><span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span></div>
+      <div class="admin-cal-grid">${cells}</div>
+    </div>`;
   }
 
   function splitDT(v) { const [date, time] = v.split("|"); return { date, time }; }
@@ -557,10 +608,25 @@
       $$("#tstList [data-tid]").forEach((el) => el.onclick = () => openTest(el.dataset.tid));
     } catch (e) { box.innerHTML = `<div class="muted">Ошибка загрузки</div>`; }
   }
+  async function reloadTests() {
+    const box = $("#tstList");
+    box.innerHTML = `<div class="muted">Обновляем… ⏳</div>`;
+    try {
+      await loadTests();
+      if (curTest) await loadTestResults(curTest, true);
+      toast("Тесты обновлены", "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
+  }
 
-  /** Готовый промпт для ЧИ: на выходе — формат, который сайт сам разбирает
+  /** Готовый промпт для ИИ: на выходе — формат, который сайт сам разбирает
    *  («Ответ: б», «Пояснение: …»). Заполняет преподаватель: предмет/класс/тема/кол-во/сложность. */
-  function aiPromptText(subj, grade, topic, count, diff) {
+  function aiPromptText(subj, grade, topic, count, diff, options) {
+    const letters = "абвгдежзи";
+    const examples = [];
+    for (let i = 0; i < (options || 4); i++) {
+      examples.push(`${letters[i]}) вариант ${i + 1}`);
+    }
+    const optsLine = examples.join(", ");
     return [
       `Составь тест по предмету ${subj} для ученика ${grade} класса.`,
       `Тема: ${topic}.`,
@@ -568,7 +634,7 @@
       "",
       "Строгие требования к формату (сайт сам разберёт текст):",
       '- Вопросы нумеруются: "1. Текст вопроса"',
-      "- У каждого вопроса 4 варианта: а) …, б) …, в) …, г) …",
+      `- У каждого вопроса ${options} варианта: ${optsLine}`,
       '- Сразу после вопроса — отдельной строкой "Ответ: б" (буква правильного варианта)',
       '- Следующей строкой — "Пояснение: 1–2 предложения, почему этот ответ правильный"',
       '- 2–3 вопроса могут быть открытыми: вместо вариантов — одна строка "Ответ: 3,14" (точный числовой или короткий ответ)',
@@ -588,12 +654,13 @@
     return `
       <details style="margin:10px 0 4px;border:1px dashed var(--line);border-radius:12px;padding:8px 12px">
         <summary class="muted-sm" style="cursor:pointer;font-weight:700">🤖 Промпт для ИИ — заполните тему, скопируйте, вставьте в ChatGPT/Claude/Gemini</summary>
-        <div class="toolbar" style="flex-wrap:wrap;margin-top:10px">
-          <select id="apSubj"><option>Математика</option><option>Физика</option><option>Химия</option><option>Биология</option><option>Информатика</option><option>Русский язык</option><option>Окружающий мир</option></select>
-          <select id="apGrade">${[4, 5, 6, 7, 8, 9].map((g) => `<option>${g} класс</option>`).join("")}</select>
-          <input id="apTopic" type="text" placeholder="Тема: например, дроби" style="min-width:220px">
-          <input id="apCount" type="number" value="10" min="1" max="30" style="width:80px" title="Сколько вопросов">
-          <select id="apDiff"><option>средняя</option><option>лёгкая</option><option>сложная</option></select>
+        <div class="toolbar ai-fields" style="flex-wrap:wrap;margin-top:10px">
+          <label>Предмет:<select id="apSubj"><option>Математика</option><option>Физика</option></select></label>
+          <label>Класс:<select id="apGrade">${[4, 5, 6, 7, 8, 9].map((g) => `<option>${g} класс</option>`).join("")}</select></label>
+          <label>Тема:<input id="apTopic" type="text" placeholder="например, дроби" style="min-width:180px"></label>
+          <label>Вопросов:<input id="apCount" type="number" value="10" min="1" max="30" style="width:70px" title="Сколько вопросов"></label>
+          <label>Вариантов:<input id="apOptions" type="number" value="4" min="2" max="8" style="width:60px" title="Сколько вариантов ответа"></label>
+          <label>Сложность:<select id="apDiff"><option>средняя</option><option>лёгкая</option><option>сложная</option></select></label>
         </div>
         <textarea id="apText" rows="10" style="width:100%;margin-top:8px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:monospace;font-size:12.5px" readonly></textarea>
         <div class="toolbar" style="margin-top:8px">
@@ -607,9 +674,9 @@
       const el = $("#apText");
       if (!el) return;
       el.value = aiPromptText($("#apSubj").value, $("#apGrade").value,
-        $("#apTopic").value.trim() || "тема", $("#apCount").value || "10", $("#apDiff").value);
+        $("#apTopic").value.trim() || "тема", $("#apCount").value || "10", $("#apDiff").value, +$("#apOptions").value || 4);
     };
-    ["apSubj", "apGrade", "apTopic", "apCount", "apDiff"].forEach((id) => {
+    ["apSubj", "apGrade", "apTopic", "apCount", "apDiff", "apOptions"].forEach((id) => {
       const el = $("#" + id);
       if (el) el.addEventListener("input", upd);
     });
@@ -646,6 +713,7 @@
         </div>
         <div id="tParsed" class="hidden">
           <label>Название теста<input id="tTitle"></label>
+          <label>Количество вариантов ответа (для вопросов с выбором)<input id="tOptions" type="number" value="4" min="2" max="8" style="width:90px"></label>
           <div class="toolbar" style="flex-wrap:wrap">
             <label class="chk"><input type="checkbox" id="tFeedback" checked> показывать ученику правильность после ответа</label>
             <label class="chk"><input type="checkbox" id="tShowScore" checked> показывать ученику итоговый балл</label>
@@ -675,7 +743,7 @@
     const msg = $("#tParseMsg"), err = $("#tErr");
     msg.textContent = "Разбираем… ⏳"; err.textContent = "";
     try {
-      const r = await api("/api/admin/tests/parse", { method: "POST", headers: H(), body: JSON.stringify({ raw }) });
+      const r = await api("/api/admin/tests/parse", { method: "POST", headers: H(), body: JSON.stringify({ raw, optionsCount: Math.max(2, Math.min(8, +$("#tOptions").value || 4)) }) });
       msg.textContent = "";
       if (!r.ok) throw new Error(r.error || "Не удалось разобрать");
       const box = $("#tParsed");
@@ -710,6 +778,7 @@
       showScore: $("#tShowScore").checked,
       noCopy: $("#tNoCopy").checked,
       maxAttempts: Math.max(1, Math.min(10, +$("#tMaxAttempts").value || 1)),
+      optionsCount: Math.max(2, Math.min(8, +$("#tOptions").value || 4)),
     };
     $("#tSaveMsg").textContent = "Сохраняем… ⏳";
     try {
@@ -730,7 +799,7 @@
       <h3 style="margin-top:0">📝 ${esc(t.title)}</h3>
       <div class="muted-sm" style="margin-bottom:10px">вопросов: ${t.count} · создан ${fmtTs(t.created)}<br>
         обратная связь после ответа: ${t.feedback ? "вкл" : "выкл"} · итоговый балл ученику: ${t.showScore ? "показывается" : "не показывается (результат — только вам)"}<br>
-        копирование текста: ${t.noCopy ? "запрещено" : "разрешено"} · попыток: ${t.maxAttempts > 1 ? "до " + t.maxAttempts : "1"}</div>
+        копирование текста: ${t.noCopy ? "запрещено" : "разрешено"} · попыток: ${t.maxAttempts > 1 ? "до " + t.maxAttempts : "1"} · вариантов ответа: ${t.optionsCount || 4}</div>
       <div class="toolbar">
         <button class="btn btn-primary btn-sm" id="tAssign">📤 Отправить ученику</button>
         <button class="mini-btn" id="tEdit">✏️ Редактировать</button>
@@ -740,7 +809,12 @@
       <div id="tAssignList" style="margin-top:14px"></div>`;
     $("#tAssign").onclick = () => openTestSend(t);
     $("#tEdit").onclick = () => editTest(t.id);
-    $("#tResults").onclick = () => loadTestResults(t);
+    $("#tResults").onclick = async () => {
+      await loadTestResults(t, true);
+      const el = $("#tAssignList");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      toast("Результаты обновлены", "ok");
+    };
     $("#tDelete").onclick = async () => {
       if (!confirm(`Удалить тест «${t.title}» вместе с результатами?`)) return;
       try {
@@ -780,10 +854,10 @@
           <label class="chk"><input type="checkbox" id="eShowScore" ${t.showScore ? "checked" : ""}> показывать ученику итоговый балл</label>
           <label class="chk"><input type="checkbox" id="eNoCopy" ${t.noCopy ? "checked" : ""}> запретить копирование текста</label>
           <label class="chk">попыток: <input type="number" id="eMaxAttempts" value="${t.maxAttempts}" min="1" max="10" style="width:64px;margin:0"></label>
+          <label class="chk">вариантов ответа: <input type="number" id="eOptions" value="${t.optionsCount || 4}" min="2" max="8" style="width:56px;margin:0"></label>
         </div>
-        ${aiPromptBlock()}
         <details style="margin:8px 0" open>
-          <summary class="muted-sm" style="cursor:pointer">Вопросы (JSON) — редактировать аккуратно, правильные варианты — номером 1–4</summary>
+          <summary class="muted-sm" style="cursor:pointer">Вопросы (JSON) — редактировать аккуратно, правильные варианты — номером 1–N</summary>
           <textarea id="eJson" rows="14" style="width:100%;margin-top:6px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:monospace;font-size:12.5px">${esc(JSON.stringify(questions, null, 2))}</textarea>
         </details>
         <div class="toolbar">
@@ -810,6 +884,7 @@
             showScore: $("#eShowScore").checked,
             noCopy: $("#eNoCopy").checked,
             maxAttempts: Math.max(1, Math.min(10, +$("#eMaxAttempts").value || 1)),
+            optionsCount: Math.max(2, Math.min(8, +$("#eOptions").value || 4)),
           }),
         });
         if (!r.ok) throw new Error(r.error || "Не получилось");
@@ -818,7 +893,6 @@
         openTest(id);
       } catch (e2) { $("#eSaveMsg").textContent = ""; $("#eErr").textContent = e2.message; }
     };
-    bindAiPrompt();
   }
   function renderTestsListActive() {
     $$("#tstList [data-tid]").forEach((el) => el.classList.toggle("active", !!curTest && el.dataset.tid === curTest.id));
@@ -829,42 +903,38 @@
     const sel = $("#tstSendStudent");
     $("#tstSendTitle").textContent = t.title;
     $("#tstSendErr").textContent = "";
-    if (!students.length) {
-      sel.innerHTML = "";
-      sel.style.display = "none";
-      $("#tstSendNoStudents").style.display = "";
-      $("#tstSendGo").disabled = true;
-    } else {
-      sel.style.display = "";
-      $("#tstSendNoStudents").style.display = "none";
-      $("#tstSendGo").disabled = false;
-      sel.innerHTML = students.map((s) => `<option value="${esc(s.phone)}">${esc(s.name || "Без имени")} · ${esc(s.phone)}${s.chat_id ? " ✈️" : ""}</option>`).join("");
-      const syncTg = () => {
-        const s = students.find((x) => x.phone === sel.value);
-        const wrap = $("#tstSendTgWrap");
-        const cb = $("#tstSendTg");
-        const has = !!(s && s.chat_id);
-        cb.disabled = !has; cb.checked = has;
-        wrap.classList.toggle("disabled", !has);
-      };
-      sel.onchange = syncTg;
-      syncTg();
-    }
+    sel.style.display = "";
+    $("#tstSendNoStudents").style.display = "none";
+    $("#tstSendGo").disabled = false;
+    const guest = `<option value="__guest__">🕊 Пустой ученик (введёт ФИО сам)</option>`;
+    sel.innerHTML = guest + students.map((s) => `<option value="${esc(s.phone)}">${esc(s.name || "Без имени")} · ${esc(s.phone)}${s.chat_id ? " ✈️" : ""}</option>`).join("");
+    const syncTg = () => {
+      const s = students.find((x) => x.phone === sel.value);
+      const wrap = $("#tstSendTgWrap");
+      const cb = $("#tstSendTg");
+      const has = !!(s && s.chat_id);
+      cb.disabled = !has; cb.checked = has;
+      wrap.classList.toggle("disabled", !has);
+    };
+    sel.onchange = syncTg;
+    syncTg();
     $("#tstSendModal").classList.remove("hidden");
   }
 
   async function sendTest() {
     const t = curTest;
     if (!t) return;
-    const phone = $("#tstSendStudent").value;
+    const rawValue = $("#tstSendStudent").value;
+    const guest = rawValue === "__guest__";
+    const phone = guest ? "" : rawValue;
     const sendCab = $("#tstSendCab").checked;
     const sendTg = $("#tstSendTg").checked && !$("#tstSendTg").disabled;
     if (!sendCab && !sendTg) return $("#tstSendErr").textContent = "Выберите, куда отправить";
     const btn = $("#tstSendGo"); btn.disabled = true; btn.textContent = "Отправляем… ⏳";
     try {
-      const r = await api("/api/admin/tests/assign", { method: "POST", headers: H(), body: JSON.stringify({ testId: t.id, phone, sendCab, sendTg }) });
+      const r = await api("/api/admin/tests/assign", { method: "POST", headers: H(), body: JSON.stringify({ testId: t.id, phone, guest, sendCab, sendTg: guest ? false : sendTg }) });
       if (!r.ok) throw new Error(r.error || "Не получилось");
-      const where = [sendCab ? "кабинет" : "", sendTg && r.tg === "sent" ? "Telegram" : ""].filter(Boolean).join(" + ") || "кабинет";
+      const where = guest ? "по ссылке" : [sendCab ? "кабинет" : "", sendTg && r.tg === "sent" ? "Telegram" : ""].filter(Boolean).join(" + ") || "кабинет";
       toast(`Тест отправлен (${where}). Ссылка: /test.html?t=${r.assignment.id}`, "ok");
       $("#tstSendModal").classList.add("hidden");
       loadTests();
@@ -884,10 +954,16 @@
         return;
       }
       const ST = { assigned: ["p-new", "не начат"], started: ["p-confirmed", "начат"], finished: ["p-done", "пройден"], cancelled: ["p-cancelled", "отменён"] };
+      const answerPreview = (list) => list.map((d) => `
+        <div class="q-preview">
+          <b>${d.i + 1}. ${esc(d.text)}</b>
+          <span class="muted-sm">ответ ученика: <b>${esc(d.given)}</b> ${d.ok ? "✅" : "❌"}</span>
+        </div>`).join("");
       box.innerHTML = `<h4 style="margin:0 0 8px">Отправки и результаты</h4>` + r.assignments.map((a) => `
         <div class="note-item" style="flex-direction:column;align-items:stretch">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-            <div><b>${esc(a.name || "Ученик")}</b> <a href="tel:${esc(a.phone)}" class="muted-sm">${esc(a.phone)}</a>
+            <div><b>${esc(a.name || (a.guest ? "Пустой ученик (введёт ФИО сам)" : "Ученик"))}</b>
+              ${a.guest ? `<span class="muted-sm">🕊 по ссылке</span>` : `<a href="tel:${esc(a.phone)}" class="muted-sm">${esc(a.phone)}</a>`}
               <span class="pill ${ST[a.status] ? ST[a.status][0] : "p-new"}">${ST[a.status] ? ST[a.status][1] : a.status}</span>
               ${a.status === "finished" ? `<b>${a.score}/${a.total}</b>` : `отвечено ${a.answered}/${a.total}`}
               ${a.visible ? "" : `<span class="muted-sm">(в кабинете скрыт)</span>`}
@@ -895,18 +971,31 @@
             <div>${a.status !== "finished" ? `<button class="mini-btn danger" data-tcancel="${esc(a.id)}" title="Отменить попытку и скрыть">✕</button>` : ""}
               ${a.status === "finished" || a.answered ? `<button class="mini-btn" data-tdet="${esc(a.id)}">Ответы</button>` : ""}</div>
           </div>
+          <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <a class="muted-sm" href="${esc(a.link)}" target="_blank" rel="noopener">🔗 ${esc(a.link)}</a>
+            <button class="mini-btn" data-tcopy="${esc(a.id)}" title="Скопировать ссылку">📋 Копировать</button>
+          </div>
           <div class="tst-det hidden" id="det-${esc(a.id)}"></div>
         </div>`).join("");
+      $$("#tAssignList [data-tcopy]").forEach((b) => b.onclick = () => {
+        const a = r.assignments.find((x) => x.id === b.dataset.tcopy);
+        if (!a) return;
+        const done = () => toast("Ссылка скопирована", "ok");
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(a.link).then(done, () => { done(); });
+        else done();
+      });
       $$("#tAssignList [data-tdet]").forEach((b) => b.onclick = () => {
         const det = $("#det-" + b.dataset.tdet);
         if (!det.classList.contains("hidden")) { det.classList.add("hidden"); return; }
         const a = r.assignments.find((x) => x.id === b.dataset.tdet);
         det.classList.remove("hidden");
-        det.innerHTML = a.detail.map((d) => `
-          <div class="q-preview">
-            <b>${d.i + 1}. ${esc(d.text)}</b>
-            <span class="muted-sm">ответ ученика: <b>${esc(d.given)}</b> ${d.ok ? "✅" : "❌"}</span>
-          </div>`).join("");
+        const current = a.detail && a.detail.length
+          ? `<h5 style="margin:10px 0 4px">${a.attempts && a.attempts > 1 ? `Попытка ${a.attempts}` : "Текущая попытка"} (${a.score != null ? `${a.score}/${a.total}` : ""})</h5>` + answerPreview(a.detail)
+          : "";
+        const history = (a.history || []).slice().reverse().map((h) => `
+          <h5 style="margin:12px 0 4px">Попытка ${h.n} · ${fmtTs(h.finishedAt)} · ${h.score}/${h.total}</h5>
+          ${answerPreview(h.detail || [])}`).join("") || "";
+        det.innerHTML = `<div class="muted-sm">${esc(a.name || "Ученик")} · попыток: ${a.attempts || 0}</div>` + (history || current ? history + current : (a.status === "finished" || a.answered ? answerPreview(a.detail || []) : ""));
       });
       $$("#tAssignList [data-tcancel]").forEach((b) => b.onclick = async () => {
         if (!confirm("Отменить эту попытку? Тест скроется из кабинета ученика (ссылка перестанет работать).")) return;
@@ -984,13 +1073,13 @@
     $("#logoutBtn").onclick = () => { sessionStorage.removeItem("adminKey"); showApp(false); };
 
     $("#schFrom").value = isoToday(0);
-    $("#schTo").value = isoToday(60);
+    $("#schTo").value = oneMonthForward();
     $("#schLoad").onclick = loadSchedule;
     $("#schStatus").onchange = renderSchedule;
     $("#schCsv").onclick = () => downloadCsv("schedule.csv",
       ["date", "time", "duration", "status", "student", "email", "phone", "subject"], schedule);
     $("#cleanupBtn").onclick = cleanup;
-    $("#clrFrom").value = isoToday(0); $("#clrTo").value = isoToday(7);
+    $("#clrFrom").value = isoToday(0); $("#clrTo").value = oneMonthForward();
     $("#clrClose").onclick = () => clearRange("close");
     $("#clrDelete").onclick = () => clearRange("delete");
 
@@ -1003,7 +1092,7 @@
     $("#slotDate").value = isoToday(0);
     $("#addSlot").onclick = addSlot;
     $("#genFrom").value = isoToday(0);
-    $("#genTo").value = isoToday(7);
+    $("#genTo").value = oneMonthForward();
     $("#genBtn").onclick = generate;
 
     $("#stSearch").oninput = renderStudents;
@@ -1013,7 +1102,7 @@
     $("#topicsCancel").onclick = () => $("#topicsModal").classList.add("hidden");
     $("#topicsNone").onclick = () => $$("#topicsModalBody input[type=checkbox]").forEach((c) => c.checked = false);
 
-    $("#tstReload").onclick = loadTests;
+    $("#tstReload").onclick = reloadTests;
     $("#tstNew").onclick = openTestEditor;
     $("#tstSendCancel").onclick = () => $("#tstSendModal").classList.add("hidden");
     $("#tstSendGo").onclick = sendTest;
