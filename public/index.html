@@ -34,9 +34,10 @@
   <div class="wrap hero-in">
     <div class="hero-text center">
       <h1 id="heroTitle">Онлайн-уроки по математике и физике</h1>
-      <p class="lead" id="heroLead" style="max-width: 640px; margin: 0 auto 24px;"><b>Математика и физика — без пробелов.</b><br>
+      <p class="lead" id="heroLead" style="max-width: 820px; margin: 0 auto 24px;"><b>Математика и физика — без пробелов.</b><br>
       Помогаю подтянуть оценки, разобраться в сложных темах и полюбить предметы.<br>
-      Индивидуальные занятия для 4–9 классов, урок — 50 минут.</p>
+      Индивидуальные занятия для 4–9 классов, урок — 50 минут.<br>
+      Занятия проходят онлайн по Екатеринбургскому времени (МСК+2).</p>
       <div class="hero-btns center">
         <a class="btn btn-primary btn-lg" href="#booking">📅 Записаться на занятие</a>
       </div>
@@ -71,7 +72,7 @@
         </div>
 
         <div class="step">
-          <div class="step-title"><span class="step-n">3</span> Время слота (<span id="tzLabel">МСК+2</span>) <span class="muted-sm" id="slotsHint"></span></div>
+          <div class="step-title"><span class="step-n">3</span> Время <span class="step-hint" id="slotsHint"></span></div>
           <div class="slots" id="slotsGrid"></div>
         </div>
 
@@ -110,8 +111,8 @@
         <div class="success hidden" id="bookSuccess">
           <div class="success-emoji">🎉</div>
           <h3 id="successTitle">Вы записаны!</h3>
-          <p id="successText"></p>
-          <p class="muted" id="remindNote"></p>
+          <p id="successText" class="preline"></p>
+          <p class="muted preline" id="remindNote"></p>
           <div class="success-btns">
             <a class="btn btn-ghost" href="#booking" id="againBtn">Записать ещё</a>
             <a class="btn btn-primary" href="#top">На главную</a>
@@ -125,9 +126,10 @@
           <ol class="side-list">
             <li>Выбираете время кнопками выше</li>
             <li>Оставляете имя и телефон</li>
-            <li>Приходит подтверждение</li>
-            <li>Перед занятием — ссылка и напоминание</li>
+            <li>Преподаватель подтверждает запись</li>
+            <li>Перед занятием Telegram-бот пришлёт напоминание и ссылку на онлайн-урок</li>
           </ol>
+          <p class="who">Записались без Telegram? Ваши занятия и сообщения преподавателя — в <a href="/cabinet.html">кабинете ученика</a>.</p>
         </div>
         <div class="side-card">
           <h4>🔁 Нужно перенести?</h4>

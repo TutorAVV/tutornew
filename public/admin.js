@@ -15,6 +15,16 @@
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
+  /** Небольшое уведомление в углу — понятно, что действие выполнилось */
+  function toast(msg, type) {
+    let host = document.getElementById("toasts");
+    if (!host) { host = document.createElement("div"); host.id = "toasts"; document.body.appendChild(host); }
+    const el = document.createElement("div");
+    el.className = "toast" + (type === "ok" ? " t-ok" : type === "err" ? " t-err" : "");
+    el.textContent = msg;
+    host.appendChild(el);
+    setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 300); }, 3400);
+  }
   function showApp(show) {
     $("#loginView").classList.toggle("hidden", show);
     $("#appView").classList.toggle("hidden", !show);
@@ -79,6 +89,12 @@
       renderSchedule();
     } catch (e) { if (e.message !== "unauthorized") box.innerHTML = `<div class="muted">Ошибка загрузки</div>`; }
   }
+  /** Перерисовать расписание, не потеряв позицию прокрутки */
+  async function loadScheduleKeep() {
+    const y = window.scrollY;
+    await loadSchedule();
+    window.scrollTo({ top: y });
+  }
 
   function renderSchedule() {
     const f = $("#schStatus").value;
@@ -121,42 +137,58 @@
   }
 
   function splitDT(v) { const [date, time] = v.split("|"); return { date, time }; }
+  function dtRu(date) { return String(date).split("-").reverse().join("."); }
 
   async function setSlotState(v, status) {
     const { date, time } = splitDT(v);
-    await api("/api/admin/slots", { method: "PATCH", headers: H(), body: JSON.stringify({ date, time, status }) });
-    loadSchedule();
+    try {
+      await api("/api/admin/slots", { method: "PATCH", headers: H(), body: JSON.stringify({ date, time, status }) });
+      toast(status === "closed" ? `Слот ${dtRu(date)} ${time} закрыт` : `Слот ${dtRu(date)} ${time} снова открыт`, "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
+    loadScheduleKeep();
   }
   async function delSlot(v) {
     if (!confirm("Удалить слот?")) return;
     const { date, time } = splitDT(v);
-    await api("/api/admin/slots", { method: "DELETE", headers: H(), body: JSON.stringify({ date, time }) });
-    loadSchedule();
+    try {
+      await api("/api/admin/slots", { method: "DELETE", headers: H(), body: JSON.stringify({ date, time }) });
+      toast(`Слот ${dtRu(date)} ${time} удалён`, "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
+    loadScheduleKeep();
   }
   async function freeBooked(v) {
     if (!confirm("Освободить слот? Запись ученика будет отменена (ему уйдёт уведомление, если привязан Telegram).")) return;
     const { date, time } = splitDT(v);
-    const bk = bookings.find((b) => (b.iso || b.date) === date && b.time === time && b.status !== "cancelled" && b.status !== "done");
-    if (bk) await api(`/api/bookings/${encodeURIComponent(bk.id)}`, { method: "PATCH", headers: H(), body: JSON.stringify({ status: "cancelled" }) });
-    await api("/api/admin/slots", { method: "PATCH", headers: H(), body: JSON.stringify({ date, time, status: "open" }) });
+    const y = window.scrollY;
+    try {
+      const bk = bookings.find((b) => (b.iso || b.date) === date && b.time === time && b.status !== "cancelled" && b.status !== "done");
+      if (bk) await api(`/api/bookings/${encodeURIComponent(bk.id)}`, { method: "PATCH", headers: H(), body: JSON.stringify({ status: "cancelled" }) });
+      await api("/api/admin/slots", { method: "PATCH", headers: H(), body: JSON.stringify({ date, time, status: "open" }) });
+      toast(`Слот ${dtRu(date)} ${time} освобождён, запись отменена`, "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
     await reloadBookings();
-    loadSchedule();
+    await loadScheduleKeep();
+    window.scrollTo({ top: y });
   }
 
   async function cleanup() {
     if (!confirm("Удалить все прошедшие свободные/закрытые слоты? Занятые (история) останутся.")) return;
-    const data = await api("/api/admin/cleanup-past", { method: "POST", headers: H() });
-    alert(`Удалено: ${data.deleted}, занятых оставлено: ${data.keptBooked || 0}`);
-    loadSchedule();
+    try {
+      const data = await api("/api/admin/cleanup-past", { method: "POST", headers: H() });
+      toast(`Удалено: ${data.deleted}, занятых оставлено: ${data.keptBooked || 0}`, "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
+    loadScheduleKeep();
   }
 
   async function clearRange(mode) {
     const from = $("#clrFrom").value, to = $("#clrTo").value;
-    if (!from || !to) return alert("Выберите диапазон");
+    if (!from || !to) return toast("Выберите диапазон дат", "err");
     if (!confirm(mode === "delete" ? `УДАЛИТЬ все слоты ${from} — ${to}?` : `Закрыть все слоты ${from} — ${to}?`)) return;
-    const data = await api("/api/admin/clear-range", { method: "POST", headers: H(), body: JSON.stringify({ from, to, mode }) });
-    alert(`Готово: ${data.affected}`);
-    loadSchedule();
+    try {
+      const data = await api("/api/admin/clear-range", { method: "POST", headers: H(), body: JSON.stringify({ from, to, mode }) });
+      toast(`Готово: обработано ${data.affected}`, "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
+    loadScheduleKeep();
   }
 
   function downloadCsv(name, head, rows) {
@@ -198,9 +230,14 @@
 
   async function setStatus(id, status) {
     if (status === "cancelled" && !confirm("Отменить запись? Слот снова станет свободным, ученику уйдёт уведомление в Telegram (если привязан).")) return;
-    await api(`/api/bookings/${encodeURIComponent(id)}`, { method: "PATCH", headers: H(), body: JSON.stringify({ status }) });
+    const y = window.scrollY;
+    try {
+      await api(`/api/bookings/${encodeURIComponent(id)}`, { method: "PATCH", headers: H(), body: JSON.stringify({ status }) });
+      toast(status === "confirmed" ? "Заявка подтверждена" : status === "done" ? "Заявка завершена" : "Заявка отменена, слот свободен", "ok");
+    } catch (e) { toast("Не получилось: " + e.message, "err"); }
     await reloadBookings();
-    loadSchedule();
+    await loadScheduleKeep();
+    window.scrollTo({ top: y });
   }
 
   // ---------- slots add/generate ----------
@@ -208,10 +245,13 @@
     const date = $("#slotDate").value || isoToday(0);
     const time = $("#newTime").value;
     const duration = +($("#newDur").value || 50);
-    if (!time) return alert("Укажите время");
-    const data = await api("/api/admin/slots", { method: "POST", headers: H(), body: JSON.stringify({ date, time, duration }) });
-    if (!data.ok) return alert(data.error || "Не получилось");
-    loadSchedule();
+    if (!time) return toast("Укажите время", "err");
+    try {
+      const data = await api("/api/admin/slots", { method: "POST", headers: H(), body: JSON.stringify({ date, time, duration }) });
+      if (!data.ok) throw new Error(data.error || "Не получилось");
+      toast(`Слот ${dtRu(date)} ${time} добавлен`, "ok");
+    } catch (e) { toast(e.message, "err"); }
+    loadScheduleKeep();
   }
 
   async function generate() {
@@ -223,14 +263,15 @@
       keepExisting: $("#genKeep").checked,
       times: $("#genTimes").value.split(",").map((s) => s.trim()).filter(Boolean),
     };
-    if (!body.from || !body.to) return alert("Выберите диапазон дат");
+    if (!body.from || !body.to) return toast("Выберите диапазон дат", "err");
     const btn = $("#genBtn"); btn.disabled = true; btn.textContent = "Генерируем… ⏳";
     try {
       const data = await api("/api/admin/generate", { method: "POST", headers: H(), body: JSON.stringify(body) });
-      if (!data.ok) return alert(data.error || "Не получилось");
-      alert(`Готово: добавлено слотов — ${data.added}`);
-      loadSchedule();
-    } finally { btn.disabled = false; btn.textContent = "⚡ Сгенерировать"; }
+      if (!data.ok) throw new Error(data.error || "Не получилось");
+      toast(`Готово: добавлено слотов — ${data.added}`, "ok");
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "⚡ Сгенерировать"; }
+    loadScheduleKeep();
   }
 
   // ---------- students ----------
@@ -271,7 +312,7 @@
       </div>
       <div class="form" style="margin-top:14px">
         <div class="row2">
-          <label>Имя<input id="sName" value="${esc(s.name || "")}"></label>
+          <label>ФИО ученика (обновится и в заявках, и в расписании)<input id="sName" value="${esc(s.name || "")}"></label>
           <label>Класс<input id="sGrade" value="${esc(s.grade || "")}"></label>
         </div>
         <div class="row2">
@@ -282,28 +323,39 @@
         <label>Заметки для себя (ученик не видит)<textarea id="sNotes" rows="2">${esc(s.notes || "")}</textarea></label>
         <div class="toolbar"><button class="btn btn-primary btn-sm" id="sSave">💾 Сохранить карточку</button><span class="muted-sm" id="sMsg"></span></div>
       </div>
-      <h4 style="margin:18px 0 8px">📨 Отправить в кабинет (и в Telegram, если привязан)</h4>
+      <h4 style="margin:18px 0 8px">📨 Отправить ученику</h4>
       <div class="form">
         <div class="row2">
           <label>Тип<select id="nType"><option value="homework">📝 Домашнее задание</option><option value="info">ℹ️ Сообщение</option><option value="link">🔗 Ссылка (урок, материалы)</option></select></label>
           <label>Ссылка (необязательно)<input id="nLink" placeholder="https://…"></label>
         </div>
         <label>Текст<textarea id="nText" rows="3" placeholder="Например: №245–250 из учебника, повторить формулы сокращённого умножения"></textarea></label>
+        <div class="toolbar">
+          <label class="chk"><input type="checkbox" id="nCab" checked> в кабинет</label>
+          <label class="chk${s.chat_id ? "" : " disabled"}"><input type="checkbox" id="nTg" ${s.chat_id ? "checked" : ""} ${s.chat_id ? "" : "disabled"}> в Telegram${s.chat_id ? "" : " (не привязан)"}</label>
+        </div>
         <div class="toolbar"><button class="btn btn-primary btn-sm" id="nSend">Отправить</button><span class="muted-sm" id="nMsg"></span></div>
       </div>
       <div id="nList" class="muted-sm">Загрузка сообщений…</div>`;
     $("#sSave").onclick = async () => {
       const body = { phone: s.phone, name: $("#sName").value, grade: $("#sGrade").value, subject: $("#sSubject").value, chat_id: $("#sChat").value, topics: $("#sTopics").value, notes: $("#sNotes").value };
       const r = await api("/api/admin/students", { method: "PUT", headers: H(), body: JSON.stringify(body) });
-      $("#sMsg").textContent = r.ok ? "Сохранено ✓" : (r.error || "Ошибка");
+      $("#sMsg").textContent = r.ok ? (r.renamed ? `Сохранено ✓ (имя обновлено в ${r.renamed} записях)` : "Сохранено ✓") : (r.error || "Ошибка");
+      if (r.ok && r.renamed) toast(`ФИО обновлено в ${r.renamed} записях`, "ok");
       Object.assign(s, body); renderStudents();
     };
     $("#nSend").onclick = async () => {
-      const body = { phone: s.phone, type: $("#nType").value, link: $("#nLink").value, text: $("#nText").value };
-      if (!body.text.trim() && !body.link.trim()) return alert("Введите текст");
+      const sendCab = $("#nCab").checked, sendTg = s.chat_id ? $("#nTg").checked : false;
+      if (!sendCab && !sendTg) return toast("Выберите, куда отправить", "err");
+      const body = { phone: s.phone, type: $("#nType").value, link: $("#nLink").value, text: $("#nText").value, sendCab, sendTg };
+      if (!body.text.trim() && !body.link.trim()) return toast("Введите текст", "err");
       const r = await api("/api/admin/students/notes", { method: "POST", headers: H(), body: JSON.stringify(body) });
-      $("#nMsg").textContent = r.ok ? (r.tg === "sent" ? "Отправлено в кабинет и Telegram ✓" : r.tg === "no-chat" ? "Сохранено в кабинет (Telegram не привязан)" : "Сохранено в кабинет, Telegram не доставлено") : (r.error || "Ошибка");
-      if (r.ok) { $("#nText").value = ""; $("#nLink").value = ""; loadNotes(s.phone); }
+      let msg;
+      if (!r.ok) msg = r.error || "Ошибка";
+      else if (!sendCab) msg = r.tg === "sent" ? "Отправлено в Telegram ✓" : "Не доставлено в Telegram";
+      else msg = r.tg === "sent" ? "Отправлено в кабинет и Telegram ✓" : r.tg === "no-chat" ? "Сохранено в кабинет (Telegram не привязан)" : r.tg === "skipped" ? "Сохранено в кабинет ✓" : "Сохранено в кабинет, Telegram не доставлено";
+      $("#nMsg").textContent = msg;
+      if (r.ok) { toast(msg, "ok"); $("#nText").value = ""; $("#nLink").value = ""; loadNotes(s.phone); }
     };
     loadNotes(s.phone);
   }
@@ -312,7 +364,7 @@
     const list = r.notes || [];
     const box = $("#nList"); if (!box) return;
     if (!list.length) { box.innerHTML = `<div class="muted-sm">Сообщений ученику ещё не было.</div>`; return; }
-    const ICON = { homework: "📝", info: "ℹ️", link: "🔗" };
+    const ICON = { homework: "📝", info: "ℹ️", link: "🔗", test: "🧪" };
     box.innerHTML = `<h4 style="margin:14px 0 6px">История</h4>` + list.map((n) => `
       <div class="note-item"><div><span class="muted-sm">${fmtTs(n.ts)}</span> ${ICON[n.type] || ""} ${esc(n.text)}${n.link ? ` <a href="${esc(n.link)}" target="_blank" rel="noopener">ссылка</a>` : ""}</div>
       <button class="mini-btn danger" data-nid="${esc(n.id)}">✕</button></div>`).join("");
@@ -409,6 +461,246 @@
     } finally { btn.textContent = "Отправить всем"; bcCheck(); }
   }
 
+  // ---------- тесты ----------
+  let tests = [], curTest = null;
+
+  async function loadTests() {
+    const box = $("#tstList");
+    try {
+      const data = await api("/api/admin/tests", { headers: H() });
+      tests = data.tests || [];
+      if (!tests.length) { box.innerHTML = `<div class="muted-sm" style="padding:8px">Тестов пока нет.<br>Нажмите «＋ Создать тест».</div>`; return; }
+      box.innerHTML = tests.map((t) => `
+        <div class="list-item${curTest && curTest.id === t.id ? " active" : ""}" data-tid="${esc(t.id)}">
+          <div><b>${esc(t.title)}</b></div>
+          <div class="muted-sm">вопросов: ${t.count} · отправлено: ${t.assigned} · пройдено: ${t.finished}</div>
+          <div class="muted-sm">${fmtTs(t.created)}</div>
+        </div>`).join("");
+      $$("#tstList [data-tid]").forEach((el) => el.onclick = () => openTest(el.dataset.tid));
+    } catch (e) { box.innerHTML = `<div class="muted">Ошибка загрузки</div>`; }
+  }
+
+  function openTestEditor() {
+    curTest = null;
+    renderTestsListActive();
+    $("#tstDetail").innerHTML = `
+      <h3 style="margin-top:0">Новый тест</h3>
+      <p class="muted-sm">Вставьте тест текстом (из учебника, сайта или от ИИ) или JSON. Понимаются варианты «а) …», «1) …», «- …», ответы после вопроса («Ответ: б») или ключом в конце («Ответы: 1-б, 2-а»), а также открытые вопросы («Ответ: 3,14»).</p>
+      <div class="form">
+        <label>Текст теста<textarea id="tRaw" rows="12" placeholder="Тест: Сложение дробей
+
+1. Сколько будет 1/2 + 1/3?
+а) 2/5
+б) 5/6
+в) 1/5
+Ответ: б
+
+2. Чему равно число π (с точностью до сотых)?
+Ответ: 3,14"></textarea></label>
+        <div class="toolbar">
+          <button class="btn btn-primary btn-sm" id="tParse">🔍 Разобрать</button>
+          <span class="muted-sm" id="tParseMsg"></span>
+        </div>
+        <div id="tParsed" class="hidden">
+          <label>Название теста<input id="tTitle"></label>
+          <div class="toolbar">
+            <label class="chk"><input type="checkbox" id="tFeedback" checked> показывать ученику правильность после ответа</label>
+            <label class="chk"><input type="checkbox" id="tShowScore" checked> показывать ученику итоговый балл</label>
+          </div>
+          <div id="tPreview"></div>
+          <details style="margin:8px 0">
+            <summary class="muted-sm" style="cursor:pointer">Правка в JSON (если предпросмотр не идеален)</summary>
+            <textarea id="tJson" rows="10" style="width:100%;margin-top:6px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:monospace;font-size:12.5px"></textarea>
+          </details>
+          <div class="toolbar">
+            <button class="btn btn-primary btn-sm" id="tSave">💾 Сохранить тест</button>
+            <span class="muted-sm" id="tSaveMsg"></span>
+          </div>
+        </div>
+        <div class="form-err" id="tErr"></div>
+      </div>`;
+    $("#tParse").onclick = parseTest;
+    $("#tSave").onclick = saveTest;
+  }
+
+  async function parseTest() {
+    const raw = $("#tRaw").value.trim();
+    const msg = $("#tParseMsg"), err = $("#tErr");
+    msg.textContent = "Разбираем… ⏳"; err.textContent = "";
+    try {
+      const r = await api("/api/admin/tests/parse", { method: "POST", headers: H(), body: JSON.stringify({ raw }) });
+      msg.textContent = "";
+      if (!r.ok) throw new Error(r.error || "Не удалось разобрать");
+      const box = $("#tParsed");
+      box.classList.remove("hidden");
+      $("#tTitle").value = r.title;
+      $("#tJson").value = JSON.stringify(r.questions, null, 2);
+      const warns = (r.warnings || []).map((w) => `<div>⚠️ ${esc(w)}</div>`).join("");
+      $("#tPreview").innerHTML =
+        (warns ? `<div class="warn-box">${warns}</div>` : "") +
+        r.questions.map((q, i) => {
+          const corr = new Set((q.correct || []).map((n) => +n - 1));
+          return `
+          <div class="q-preview">
+            <b>${i + 1}. ${esc(q.text)}</b>
+            ${q.type === "input"
+              ? `<span class="muted-sm">✏️ открытый ответ: <b>${esc(q.answer)}</b></span>`
+              : q.options.map((o, j) => `<div class="q-opt${corr.has(j) ? " ok" : ""}">${"абвгдежзи"[j] || (j + 1)}) ${esc(o)}${corr.has(j) ? " ✓" : ""}</div>`).join("")}
+          </div>`;
+        }).join("");
+      $("#tParseMsg").textContent = `Нашлось вопросов: ${r.questions.length}` + (r.questions.length ? " ✓" : "");
+    } catch (e) { msg.textContent = ""; err.textContent = e.message; }
+  }
+
+  async function saveTest() {
+    let questions;
+    try { questions = JSON.parse($("#tJson").value); }
+    catch (e) { return $("#tSaveMsg").textContent = "JSON в поле правки сломан: " + e.message; }
+    const body = {
+      title: $("#tTitle").value.trim() || "Тест",
+      questions,
+      feedback: $("#tFeedback").checked,
+      showScore: $("#tShowScore").checked,
+    };
+    $("#tSaveMsg").textContent = "Сохраняем… ⏳";
+    try {
+      const r = await api("/api/admin/tests", { method: "POST", headers: H(), body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(r.error || "Не получилось");
+      toast(`Тест «${r.test.title}» сохранён (${r.test.count} вопросов)`, "ok");
+      await loadTests();
+      openTest(r.test.id);
+    } catch (e) { $("#tSaveMsg").textContent = ""; $("#tErr").textContent = e.message; }
+  }
+
+  async function openTest(id) {
+    curTest = tests.find((t) => t.id === id) || null;
+    renderTestsListActive();
+    if (!curTest) return;
+    const t = curTest;
+    $("#tstDetail").innerHTML = `
+      <h3 style="margin-top:0">📝 ${esc(t.title)}</h3>
+      <div class="muted-sm" style="margin-bottom:10px">вопросов: ${t.count} · создан ${fmtTs(t.created)}<br>
+        обратная связь после ответа: ${t.feedback ? "вкл" : "выкл"} · итоговый балл ученику: ${t.showScore ? "показывается" : "не показывается (результат — только вам)"}</div>
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" id="tAssign">📤 Отправить ученику</button>
+        <button class="mini-btn" id="tResults">📊 Результаты</button>
+        <button class="mini-btn danger" id="tDelete">🗑 Удалить</button>
+      </div>
+      <div id="tAssignList" style="margin-top:14px"></div>`;
+    $("#tAssign").onclick = () => openTestSend(t);
+    $("#tResults").onclick = () => loadTestResults(t);
+    $("#tDelete").onclick = async () => {
+      if (!confirm(`Удалить тест «${t.title}» вместе с результатами?`)) return;
+      try {
+        await api(`/api/admin/tests/${encodeURIComponent(t.id)}`, { method: "DELETE", headers: H() });
+        toast("Тест удалён", "ok");
+        curTest = null;
+        $("#tstDetail").innerHTML = `<div class="muted">Выберите тест слева или создайте новый.</div>`;
+        loadTests();
+      } catch (e) { toast("Не получилось: " + e.message, "err"); }
+    };
+    loadTestResults(t, true);
+  }
+  function renderTestsListActive() {
+    $$("#tstList [data-tid]").forEach((el) => el.classList.toggle("active", !!curTest && el.dataset.tid === curTest.id));
+  }
+
+  async function openTestSend(t) {
+    if (!students.length) { try { await loadStudents(); } catch (e) {} }
+    const sel = $("#tstSendStudent");
+    $("#tstSendTitle").textContent = t.title;
+    $("#tstSendErr").textContent = "";
+    if (!students.length) {
+      sel.innerHTML = "";
+      sel.style.display = "none";
+      $("#tstSendNoStudents").style.display = "";
+      $("#tstSendGo").disabled = true;
+    } else {
+      sel.style.display = "";
+      $("#tstSendNoStudents").style.display = "none";
+      $("#tstSendGo").disabled = false;
+      sel.innerHTML = students.map((s) => `<option value="${esc(s.phone)}">${esc(s.name || "Без имени")} · ${esc(s.phone)}${s.chat_id ? " ✈️" : ""}</option>`).join("");
+      const syncTg = () => {
+        const s = students.find((x) => x.phone === sel.value);
+        const wrap = $("#tstSendTgWrap");
+        const cb = $("#tstSendTg");
+        const has = !!(s && s.chat_id);
+        cb.disabled = !has; cb.checked = has;
+        wrap.classList.toggle("disabled", !has);
+      };
+      sel.onchange = syncTg;
+      syncTg();
+    }
+    $("#tstSendModal").classList.remove("hidden");
+  }
+
+  async function sendTest() {
+    const t = curTest;
+    if (!t) return;
+    const phone = $("#tstSendStudent").value;
+    const sendCab = $("#tstSendCab").checked;
+    const sendTg = $("#tstSendTg").checked && !$("#tstSendTg").disabled;
+    if (!sendCab && !sendTg) return $("#tstSendErr").textContent = "Выберите, куда отправить";
+    const btn = $("#tstSendGo"); btn.disabled = true; btn.textContent = "Отправляем… ⏳";
+    try {
+      const r = await api("/api/admin/tests/assign", { method: "POST", headers: H(), body: JSON.stringify({ testId: t.id, phone, sendCab, sendTg }) });
+      if (!r.ok) throw new Error(r.error || "Не получилось");
+      const where = [sendCab ? "кабинет" : "", sendTg && r.tg === "sent" ? "Telegram" : ""].filter(Boolean).join(" + ") || "кабинет";
+      toast(`Тест отправлен (${where}). Ссылка: /test.html?t=${r.assignment.id}`, "ok");
+      $("#tstSendModal").classList.add("hidden");
+      loadTests();
+      if (curTest && curTest.id === t.id) loadTestResults(curTest, true);
+    } catch (e) { $("#tstSendErr").textContent = e.message; }
+    finally { btn.disabled = false; btn.textContent = "Отправить"; }
+  }
+
+  async function loadTestResults(t, silent) {
+    const box = $("#tAssignList");
+    if (!box) return;
+    try {
+      const r = await api(`/api/admin/tests/results?testId=${encodeURIComponent(t.id)}`, { headers: H() });
+      if (!r.ok) throw new Error(r.error || "Ошибка");
+      if (!r.assignments.length) {
+        box.innerHTML = `<div class="muted-sm">Пока никому не отправлен. Нажмите «📤 Отправить ученику».</div>`;
+        return;
+      }
+      const ST = { assigned: ["p-new", "не начат"], started: ["p-confirmed", "начат"], finished: ["p-done", "пройден"], cancelled: ["p-cancelled", "отменён"] };
+      box.innerHTML = `<h4 style="margin:0 0 8px">Отправки и результаты</h4>` + r.assignments.map((a) => `
+        <div class="note-item" style="flex-direction:column;align-items:stretch">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+            <div><b>${esc(a.name || "Ученик")}</b> <a href="tel:${esc(a.phone)}" class="muted-sm">${esc(a.phone)}</a>
+              <span class="pill ${ST[a.status] ? ST[a.status][0] : "p-new"}">${ST[a.status] ? ST[a.status][1] : a.status}</span>
+              ${a.status === "finished" ? `<b>${a.score}/${a.total}</b>` : `отвечено ${a.answered}/${a.total}`}
+              ${a.visible ? "" : `<span class="muted-sm">(в кабинете скрыт)</span>`}
+            </div>
+            <div>${a.status !== "finished" ? `<button class="mini-btn danger" data-tcancel="${esc(a.id)}" title="Отменить попытку и скрыть">✕</button>` : ""}
+              ${a.status === "finished" || a.answered ? `<button class="mini-btn" data-tdet="${esc(a.id)}">Ответы</button>` : ""}</div>
+          </div>
+          <div class="tst-det hidden" id="det-${esc(a.id)}"></div>
+        </div>`).join("");
+      $$("#tAssignList [data-tdet]").forEach((b) => b.onclick = () => {
+        const det = $("#det-" + b.dataset.tdet);
+        if (!det.classList.contains("hidden")) { det.classList.add("hidden"); return; }
+        const a = r.assignments.find((x) => x.id === b.dataset.tdet);
+        det.classList.remove("hidden");
+        det.innerHTML = a.detail.map((d) => `
+          <div class="q-preview">
+            <b>${d.i + 1}. ${esc(d.text)}</b>
+            <span class="muted-sm">ответ ученика: <b>${esc(d.given)}</b> ${d.ok ? "✅" : "❌"}</span>
+          </div>`).join("");
+      });
+      $$("#tAssignList [data-tcancel]").forEach((b) => b.onclick = async () => {
+        if (!confirm("Отменить эту попытку? Тест скроется из кабинета ученика (ссылка перестанет работать).")) return;
+        try {
+          await api("/api/admin/tests/cancel", { method: "POST", headers: H(), body: JSON.stringify({ id: b.dataset.tcancel }) });
+          toast("Попытка отменена", "ok");
+          loadTestResults(t, true);
+          loadTests();
+        } catch (e) { toast("Не получилось: " + e.message, "err"); }
+      });
+    } catch (e) { if (!silent) toast("Не получилось: " + e.message, "err"); box.innerHTML = `<div class="muted-sm">Ошибка загрузки результатов</div>`; }
+  }
+
   // ---------- settings ----------
   async function loadSettings() {
     const d = await api("/api/admin/settings", { headers: H() });
@@ -443,8 +735,9 @@
   function init() {
     $$(".tab").forEach((t) => t.onclick = () => {
       $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
-      ["schedule", "bookings", "slots", "students", "tg", "settings", "help"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
+      ["schedule", "bookings", "slots", "students", "tests", "tg", "settings", "help"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
       if (t.dataset.tab === "students") loadStudents();
+      if (t.dataset.tab === "tests") loadTests();
       if (t.dataset.tab === "settings") loadSettings();
       if (t.dataset.tab === "tg") { loadTgStatus(); loadTgUsers(); clearInterval(tgTimer); tgTimer = setInterval(() => { if (!$("#tab-tg").classList.contains("hidden")) { loadTgUsers(); if (curChat) loadChat(); } }, 20000); }
     });
@@ -477,6 +770,11 @@
 
     $("#stSearch").oninput = renderStudents;
     $("#stReload").onclick = loadStudents;
+
+    $("#tstReload").onclick = loadTests;
+    $("#tstNew").onclick = openTestEditor;
+    $("#tstSendCancel").onclick = () => $("#tstSendModal").classList.add("hidden");
+    $("#tstSendGo").onclick = sendTest;
 
     $("#tgReload").onclick = () => { loadTgStatus(); loadTgUsers(); if (curChat) loadChat(); };
     $("#tgSend").onclick = tgSendMsg;

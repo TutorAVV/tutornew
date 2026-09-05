@@ -35,7 +35,7 @@ const DEFAULTS = {
   tutorName: process.env.TUTOR_NAME || "Онлайн-уроки",
   siteTitle: process.env.SITE_TITLE || "Онлайн‑уроки | Запись на занятия по математике и физике",
   heroTitle: "Онлайн-уроки по математике и физике",
-  heroLead: "Математика и физика — без пробелов.\nПомогаю подтянуть оценки, разобраться в сложных темах и полюбить предметы.\nИндивидуальные занятия для 4–9 классов, урок — 50 минут.",
+  heroLead: "Математика и физика — без пробелов.\nПомогаю подтянуть оценки, разобраться в сложных темах и полюбить предметы.\nИндивидуальные занятия для 4–9 классов, урок — 50 минут.\nЗанятия проходят онлайн по Екатеринбургскому времени (МСК+2).",
   subjects: process.env.TUTOR_SUBJECTS || "Математика,Физика",
   grades: "4 класс,5 класс,6 класс,7 класс,8 класс,9 класс (ОГЭ)",
   tutorTg: (process.env.TUTOR_TG || "aviation09").replace(/^@/, ""),
@@ -238,6 +238,7 @@ async function publicConfig() {
     contactsText: s.contactsText, bookingNote: s.bookingNote,
     cabinetEnabled: s.cabinetEnabled !== "0",
     botEnabled: !!BOT_TOKEN,
+    botUsername: BOT_USERNAME,
   };
 }
 
@@ -251,6 +252,15 @@ async function tgApi(method, body) {
     return r.json();
   } catch (e) { return { ok: false, description: e.message }; }
 }
+/** Username бота — для ссылок «открыть бота». Обновляем в фоне, чтобы не тормозить запросы. */
+let BOT_USERNAME = (process.env.BOT_USERNAME || "").trim().replace(/^@/, "");
+async function refreshBotUsername() {
+  if (!BOT_TOKEN) return;
+  try { const r = await tgApi("getMe"); if (r && r.ok && r.result && r.result.username) BOT_USERNAME = r.result.username; }
+  catch (e) {}
+}
+refreshBotUsername();
+setInterval(refreshBotUsername, 10 * 60 * 1000).unref();
 async function tgSend(chatId, text, extra) {
   if (!chatId) return { ok: false, description: "нет chat id" };
   return tgApi("sendMessage", { chat_id: String(chatId), text, ...(extra || {}) });
@@ -547,7 +557,7 @@ app.get("/api/cabinet", async (req, res) => {
   try {
     const cfg = await publicConfig();
     if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
-    const [students, bookings, notes, users] = await Promise.all([tbl.list("Students"), allBookings(), tbl.list("Notes"), tbl.list("Users")]);
+    const [students, bookings, notes, users, assigns, tests] = await Promise.all([tbl.list("Students"), allBookings(), tbl.list("Notes"), tbl.list("Users"), tbl.list("TestAssign"), tbl.list("Tests")]);
     const st = students.find((x) => samePhone(x.phone, phone));
     const mine = bookings.filter((b) => samePhone(b.phone, phone));
     if (!st && !mine.length) return res.status(404).json({ ok: false, error: "Ученик с таким номером не найден. Сначала запишитесь на занятие." });
@@ -557,8 +567,23 @@ app.get("/api/cabinet", async (req, res) => {
       .map((b) => ({ id: b.id, dsp: b.dsp, time: b.time, subject: b.subject, status: b.status, canReschedule: b.canReschedule }));
     const history = mine.filter((b) => b.status === "done").sort((a, b) => (a.iso + a.time < b.iso + b.time ? 1 : -1)).slice(0, 30)
       .map((b) => ({ date: toDsp(b.iso), time: b.time, subject: b.subject }));
-    const myNotes = notes.filter((n) => samePhone(n.phone, phone)).sort((a, b) => (a.ts < b.ts ? 1 : -1))
+    const myNotes = notes.filter((n) => samePhone(n.phone, phone) && n.type !== "test").sort((a, b) => (a.ts < b.ts ? 1 : -1))
       .map((n) => ({ id: n.id, ts: n.ts, type: n.type, text: n.text, link: n.link }));
+    const testById = new Map(tests.map((t) => [String(t.id), t]));
+    const myTests = assigns.filter((a) => samePhone(a.phone, phone) && a.visible !== "0")
+      .sort((a, b) => (String(a.createdAt) < String(b.createdAt) ? 1 : -1))
+      .map((a) => {
+        const t = testById.get(String(a.testId));
+        const answers = parseAssignAnswers(a);
+        return {
+          id: a.id, title: a.title || (t && t.title) || "Тест", status: a.status || "assigned",
+          score: a.score === "" || a.score == null ? null : +a.score,
+          total: +a.total || +(t && t.count) || 0,
+          answered: Object.keys(answers).length,
+          showScore: !t || t.showScore !== "0",
+          createdAt: a.createdAt, finishedAt: a.finishedAt || "",
+        };
+      });
     const tgLinked = !!(st && st.chat_id) || users.some((u) => u.phone && samePhone(u.phone, phone));
     res.json({
       ok: true,
@@ -566,7 +591,7 @@ app.get("/api/cabinet", async (req, res) => {
         name: (st && st.name) || lastB.name || "", grade: (st && st.grade) || lastB.grade || "",
         subject: (st && st.subject) || lastB.subject || "", topics: (st && st.topics) || "", phone: (st && st.phone) || lastB.phone || phone,
       },
-      stats: studentStats(phone, bookings, cfg), upcoming, history, notes: myNotes, tgLinked,
+      stats: studentStats(phone, bookings, cfg), upcoming, history, notes: myNotes, tests: myTests, tgLinked,
       rescheduleHours: cfg.rescheduleHours, tzLabel: cfg.tzLabel,
     });
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "cabinet failed" }); }
@@ -918,7 +943,23 @@ app.put("/api/admin/students", needAdmin, async (req, res) => {
     const ex = list.find((x) => samePhone(x.phone, b.phone));
     if (ex) await tbl.update("Students", "phone", ex.phone, patch);
     else await tbl.append("Students", { phone: String(b.phone), name: "", grade: "", subject: "", chat_id: "", topics: "", notes: "", created: new Date().toISOString(), ...patch });
-    res.json({ ok: true });
+    // Изменили ФИО — переименовываем ученика везде (заявки + слоты), чтобы не лазить в таблицу
+    let renamed = 0;
+    const newName = String(b.name || "").trim();
+    if (newName.length >= 2 && (!ex || String(ex.name || "").trim() !== newName)) {
+      try {
+        if (APPS_SCRIPT_URL) {
+          const r = await appsScript("renameStudent", { phone: b.phone, name: newName }, "POST");
+          renamed = +((r && r.renamed) || 0);
+        } else {
+          const db = loadDb();
+          for (const bk of db.bookings) if (samePhone(bk.phone, b.phone)) { bk.name = newName; renamed++; }
+          for (const arr of Object.values(db.slots)) for (const s of arr) if (samePhone(s.phone, b.phone) && s.student) { s.student = newName; renamed++; }
+          saveDb(db);
+        }
+      } catch (e) { console.error("renameStudent:", e.message); }
+    }
+    res.json({ ok: true, renamed });
   } catch (e) { res.status(500).json({ ok: false, error: "save failed" }); }
 });
 app.get("/api/admin/students/notes", needAdmin, async (req, res) => {
@@ -928,7 +969,8 @@ app.get("/api/admin/students/notes", needAdmin, async (req, res) => {
     res.json({ ok: true, notes });
   } catch (e) { res.status(500).json({ ok: false, error: "notes failed" }); }
 });
-/** Сообщение ученику в кабинет (домашка, ссылка, заметка) + дублируем в Telegram, если привязан */
+/** Сообщение ученику в кабинет (домашка, ссылка, заметка) + дублируем в Telegram, если привязан.
+ *  Флаги sendCab / sendTg позволяют отключить один из каналов. */
 app.post("/api/admin/students/notes", needAdmin, async (req, res) => {
   const b = req.body || {};
   const text = esc(b.text, 4000).trim(), link = esc(b.link, 500).trim();
@@ -936,7 +978,7 @@ app.post("/api/admin/students/notes", needAdmin, async (req, res) => {
   if (digits(b.phone).length < 10 || (!text && !link)) return res.status(400).json({ ok: false, error: "Нужны телефон и текст" });
   try {
     const row = { id: newId("N"), ts: new Date().toISOString(), phone: String(b.phone), type, text, link };
-    await tbl.append("Notes", row);
+    if (b.sendCab !== false) await tbl.append("Notes", row);
     let tg = "";
     if (b.sendTg !== false) {
       let chatId = "";
@@ -949,8 +991,8 @@ app.post("/api/admin/students/notes", needAdmin, async (req, res) => {
         tg = r.ok ? "sent" : "failed";
         await storeMessage({ dir: "out", chatId, name: "Преподаватель", text: `${head}: ${text} ${link}`.trim(), status: r.ok ? "ok" : "failed", kind: "note" });
       } else tg = "no-chat";
-    }
-    res.json({ ok: true, note: row, tg });
+    } else tg = "skipped";
+    res.json({ ok: true, note: b.sendCab !== false ? row : null, tg });
   } catch (e) { res.status(500).json({ ok: false, error: "note failed" }); }
 });
 app.delete("/api/admin/students/notes", needAdmin, async (req, res) => {
@@ -958,6 +1000,422 @@ app.delete("/api/admin/students/notes", needAdmin, async (req, res) => {
   if (!id) return res.status(400).json({ ok: false, error: "bad id" });
   try { res.json(await tbl.remove("Notes", "id", id)); }
   catch (e) { res.status(500).json({ ok: false, error: "delete failed" }); }
+});
+
+// ---------- тесты ----------
+/**
+ * Тесты для учеников. Хранятся в отдельных листах (не трогаем основную БД):
+ *   Tests       — id, title, questions(JSON), count, feedback, showScore, created
+ *   TestAssign  — id (ссылка-токен для ученика), testId, title, phone, name, status,
+ *                 answers(JSON), score, total, visible, createdAt, startedAt, finishedAt
+ *
+ * Правильные ответы НЕ отправляются ученику до того, как он ответил на вопрос,
+ * и только если преподаватель включил обратную связь. Пройти тест можно один раз.
+ */
+const TEST_QUESTIONS_MAX = 60;
+
+/** Нормализация текстового ответа для сравнения: регистр, пробелы, запятая в десятичных */
+function normAnsText(s) {
+  return String(s == null ? "" : s).toLowerCase().replace(/,/g, ".").replace(/\s+/g, "").trim();
+}
+/** «а»/«A»/«1» → индекс варианта с нуля, иначе -1 */
+function letterIndex(s) {
+  s = String(s == null ? "" : s).trim().toLowerCase();
+  if (!s) return -1;
+  if (/^\d+$/.test(s)) { const n = +s; return n >= 1 ? n - 1 : -1; }
+  if (s.length !== 1) return -1;
+  const ru = "абвгдежз".indexOf(s);
+  if (ru > -1) return ru;
+  return "abcdefgh".indexOf(s);
+}
+/** Разобрать ссылку на ответ («б», «2», «1,3», «аб», «12 см») → массив индексов */
+function parseAnswerRef(val, options) {
+  const s = String(val == null ? "" : val).trim();
+  if (!s) return [];
+  let parts = s.split(/[,;+]/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 1 && /^[абвгдежзabcdef]{2,8}$/i.test(parts[0])) parts = parts[0].split("");
+  const idxs = parts.map(letterIndex);
+  if (parts.length && idxs.every((i) => i >= 0 && i < options.length) && new Set(idxs).size === parts.length)
+    return [...new Set(idxs)];
+  // точное совпадение с текстом варианта
+  const byText = [];
+  for (const p of parts) {
+    const i = options.findIndex((o) => normAnsText(o) === normAnsText(p));
+    if (i === -1) return [];
+    byText.push(i);
+  }
+  return [...new Set(byText)];
+}
+/** Приводим вопросы к единому виду: choice (options + correct[]) | input (answer) */
+function normalizeQuestions(qs) {
+  const out = [];
+  if (!Array.isArray(qs)) return out;
+  for (const q of qs.slice(0, TEST_QUESTIONS_MAX)) {
+    if (!q || typeof q !== "object") continue;
+    const text = String(q.text || q.q || q.question || "").trim().slice(0, 500);
+    if (!text) continue;
+    const explanation = String(q.explanation || q.comment || "").trim().slice(0, 500);
+    const options = (Array.isArray(q.options) ? q.options : [])
+      .map((o) => String(typeof o === "object" && o ? (o.text || o.label || "") : o).trim().slice(0, 300))
+      .filter(Boolean).slice(0, 10);
+    if (options.length >= 2) {
+      const raw = q.correct === undefined ? q.answer : q.correct;
+      let correct = [];
+      for (const v of (Array.isArray(raw) ? raw : [raw])) {
+        if (typeof v === "number" && Number.isFinite(v)) { const i = Math.trunc(v) - 1; if (i >= 0 && i < options.length) correct.push(i); }
+        else correct.push(...parseAnswerRef(v, options));
+      }
+      correct = [...new Set(correct)].sort((a, b) => a - b);
+      if (!correct.length) continue;
+      out.push({ type: "choice", text, options, correct, multi: correct.length > 1, explanation });
+    } else {
+      const raw = q.answer !== undefined ? q.answer : (Array.isArray(q.correct) ? q.correct[0] : q.correct);
+      if (raw === undefined || raw === null) continue;
+      const answer = String(raw).trim().slice(0, 200);
+      if (!answer) continue;
+      out.push({ type: "input", text, answer, explanation });
+    }
+  }
+  return out;
+}
+/** JSON-формат теста (удобно просить ИИ выдать сразу JSON) */
+function parseTestJson(data) {
+  let title = "", arr = [];
+  if (Array.isArray(data)) arr = data;
+  else {
+    const o = data || {};
+    title = String(o.title || o.name || o.test || o.topic || "").slice(0, 200);
+    arr = o.questions || o.items || o.test || [];
+    if (!Array.isArray(arr)) arr = [];
+  }
+  const questions = normalizeQuestions(arr);
+  if (!questions.length) return { ok: false, error: "В JSON не нашлось ни одного вопроса с ответом" };
+  return { ok: true, title: title || "Тест", questions, warnings: [] };
+}
+/** Тест простым текстом: «1. Вопрос / а) вариант / Ответ: б» (+ блок «Ответы: 1-б, 2-а» в конце) */
+function parseTestPlain(raw) {
+  const lines = String(raw).split("\n");
+  const warnings = [];
+  const blocks = []; // { n, text, options, answerRaw, explanation }
+  const key = new Map(); // номер вопроса → строка ответа
+  let title = "";
+  let cur = null;
+  let mode = "body";
+  const isTitle = (l) => /^\s*(тест|тема|заголовок|название)\s*[:—-]\s*\S+/i.test(l);
+  const flush = () => { if (cur) { blocks.push(cur); cur = null; } };
+  for (const line of lines) {
+    const l = line.trim();
+    if (!l) continue;
+    if (mode === "key") {
+      const pairs = l.match(/\d{1,3}\s*[-–—.=)]\s*[^\s,;]+/g) || [];
+      for (const p of pairs) {
+        const m = p.match(/^(\d{1,3})\s*[-–—.=)]\s*(.+)$/);
+        if (m) key.set(+m[1], m[2].replace(/[.,;]$/, ""));
+      }
+      continue;
+    }
+    const keyHead = l.match(/^(ключ|ответы)\s*[:\-–—]?\s*(.*)$/i);
+    if (keyHead) {
+      const rest = keyHead[2].trim();
+      const restPairs = (rest.match(/\d{1,3}\s*[-–—.=)]\s*[^\s,;]+/g) || []);
+      if (!rest || restPairs.length) {
+        flush(); mode = "key";
+        for (const p of restPairs) {
+          const m = p.match(/^(\d{1,3})\s*[-–—.=)]\s*(.+)$/);
+          if (m) key.set(+m[1], m[2].replace(/[.,;]$/, ""));
+        }
+        continue;
+      }
+      // «Ответы: б» без пар — считаем обычным ответом на текущий вопрос (ниже)
+    }
+    if (!title && !blocks.length && !cur) {
+      if (isTitle(l)) { title = l.replace(/^\s*(тест|тема|заголовок|название)\s*[:—-]\s*/i, "").slice(0, 200); continue; }
+      const looksQuestion = /^\s*(?:Вопрос\s*\d|Вопрос\b|\d{1,3}\s*[.)])/i.test(l);
+      if (!looksQuestion) { title = l.replace(/^#+\s*/, "").slice(0, 200); continue; }
+    }
+    let m = l.match(/^(?:Ответ|Правильный ответ|Правильно|Ответы)\s*[:\-–—]?\s*(.+)$/i);
+    if (m) { if (cur) cur.answerRaw = m[1].trim(); continue; }
+    m = l.match(/^Пояснение\s*[:\-–—]?\s*(.+)$/i) || l.match(/^Объяснение\s*[:\-–—]?\s*(.+)$/i);
+    if (m) { if (cur) cur.explanation = m[1].trim(); continue; }
+    // вопрос: «1.», «1)», «Вопрос 3.»
+    const qm = l.match(/^(?:Вопрос\s*(\d{1,3})\s*[.)]?|(\d{1,3})([.)]))\s*(.*)$/i);
+    const om = l.match(/^(?:[-*•·]\s+(.+)|([а-яёa-z])(?:\)|[-–—.])\s+(.+)|(\d{1,2})\)\s*(.+))$/i);
+    const expectedQ = blocks.length + 1;
+    if (qm && qm[4]) {
+      const num = +(qm[1] || qm[2] || expectedQ);
+      const paren = qm[3] === ")";
+      // «N)» может быть и вариантом ответа («1) да 2) нет»): вопросом считаем,
+      // только если номер — следующий по порядку, а текущий вопрос уже «закрыт»
+      // (набраны варианты или есть строка ответа). «N.» и «Вопрос N» — всегда вопрос.
+      const startNew = !cur || !paren || (num === expectedQ && (cur.options.length >= 2 || cur.answerRaw != null));
+      if (startNew) {
+        flush();
+        cur = { n: num, text: qm[4].trim(), options: [], answerRaw: null, explanation: "" };
+        continue;
+      }
+    }
+    if (om) {
+      const optText = (om[1] || om[3] || om[5] || "").trim();
+      if (cur && optText) { cur.options.push(optText.slice(0, 300)); continue; }
+    }
+    // продолжение текста вопроса/варианта на новой строке
+    if (cur) {
+      if (cur.options.length) cur.options[cur.options.length - 1] += " " + l;
+      else cur.text += " " + l;
+    }
+  }
+  flush();
+  // применяем ответы (строка «Ответ: …» у вопроса или ключ в конце)
+  const questions = [];
+  for (const b of blocks) {
+    if (b.options.length >= 2) {
+      const ref = b.answerRaw != null && String(b.answerRaw).trim() !== ""
+        ? parseAnswerRef(b.answerRaw, b.options)
+        : parseAnswerRef(key.get(b.n) || "", b.options);
+      if (ref.length) questions.push({ type: "choice", text: b.text, options: b.options, correct: ref, multi: ref.length > 1, explanation: b.explanation || "" });
+      else warnings.push(`Вопрос ${b.n}: не понял, какой ответ правильный — вопрос пропущен.`);
+    } else if (b.answerRaw != null && String(b.answerRaw).trim() !== "") {
+      questions.push({ type: "input", text: b.text, answer: String(b.answerRaw).trim().slice(0, 200), explanation: b.explanation || "" });
+    } else {
+      warnings.push(`Вопрос ${b.n}: нет вариантов ответа и нет строки «Ответ: …» — пропущен.`);
+    }
+  }
+  if (!questions.length) return { ok: false, error: "Не удалось найти ни одного вопроса. Проверьте формат (нумерация вопросов и варианты а)/б)/в), строка «Ответ: …»)." };
+  if (!title) title = "Тест";
+  return { ok: true, title: title.slice(0, 200), questions, warnings };
+}
+function parseTestRaw(raw) {
+  raw = String(raw || "").replace(/\r/g, "").trim();
+  if (!raw) return { ok: false, error: "Пустой текст" };
+  let r;
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    try { r = parseTestJson(JSON.parse(raw)); }
+    catch (e) { return { ok: false, error: "Это похоже на JSON, но не разбирается: " + e.message }; }
+  } else r = parseTestPlain(raw);
+  // наружу отдаём номера правильных вариантов С ЕДИНИЦЫ (так же читает normalizeQuestions при сохранении)
+  if (r && r.ok) {
+    r.questions = r.questions.map((q) => q.type === "input" ? q : { ...q, correct: (q.correct || []).map((i) => i + 1) });
+  }
+  return r;
+}
+function parseAssignAnswers(a) {
+  try { return JSON.parse(a && a.answers ? a.answers : "{}") || {}; } catch (e) { return {}; }
+}
+function isCorrectAnswer(q, given) {
+  if (!q) return false;
+  if (q.type === "input") return normAnsText(given) === normAnsText(q.answer);
+  const g = (Array.isArray(given) ? given : [given]).map(Number).filter((x) => Number.isInteger(x));
+  const c = q.correct || [];
+  return g.length === c.length && g.every((x) => c.includes(x));
+}
+
+/** Разобрать вставленный текст теста (предпросмотр, без сохранения) */
+app.post("/api/admin/tests/parse", needAdmin, async (req, res) => {
+  try { res.json(parseTestRaw((req.body || {}).raw)); }
+  catch (e) { res.status(500).json({ ok: false, error: "parse failed" }); }
+});
+/** Сохранить тест */
+app.post("/api/admin/tests", needAdmin, async (req, res) => {
+  const b = req.body || {};
+  try {
+    const questions = normalizeQuestions(b.questions);
+    if (!questions.length) return res.status(400).json({ ok: false, error: "Нет ни одного корректного вопроса" });
+    const row = {
+      id: newId("TS"), title: esc(b.title || "Тест", 200), questions: JSON.stringify(questions),
+      count: questions.length, feedback: b.feedback === false ? "0" : "1", showScore: b.showScore === false ? "0" : "1",
+      created: new Date().toISOString(),
+    };
+    await tbl.append("Tests", row);
+    res.json({ ok: true, test: { ...row, questions: undefined } });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "save failed" }); }
+});
+/** Список тестов (+ сводка по отправкам) */
+app.get("/api/admin/tests", needAdmin, async (req, res) => {
+  try {
+    const [tests, assigns] = await Promise.all([tbl.list("Tests"), tbl.list("TestAssign")]);
+    const out = tests.map((t) => ({
+      id: t.id, title: t.title, count: +t.count || 0, feedback: t.feedback !== "0", showScore: t.showScore !== "0",
+      created: t.created,
+      assigned: assigns.filter((a) => String(a.testId) === String(t.id)).length,
+      finished: assigns.filter((a) => String(a.testId) === String(t.id) && a.status === "finished").length,
+    })).sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")));
+    res.json({ ok: true, tests: out });
+  } catch (e) { res.status(500).json({ ok: false, error: "list failed" }); }
+});
+app.delete("/api/admin/tests/:id", needAdmin, async (req, res) => {
+  try {
+    const assigns = (await tbl.list("TestAssign")).filter((a) => String(a.testId) === String(req.params.id));
+    for (const a of assigns) await tbl.remove("TestAssign", "id", a.id);
+    await tbl.remove("Tests", "id", req.params.id);
+    res.json({ ok: true, removed: assigns.length + 1 });
+  } catch (e) { res.status(500).json({ ok: false, error: "delete failed" }); }
+});
+/** Отправить тест ученику: создаёт персональную одноразовую ссылку */
+app.post("/api/admin/tests/assign", needAdmin, async (req, res) => {
+  const b = req.body || {};
+  const testId = String(b.testId || "");
+  if (digits(b.phone).length < 10 || !testId) return res.status(400).json({ ok: false, error: "Нужны тест и телефон ученика" });
+  try {
+    const tests = await tbl.list("Tests");
+    const t = tests.find((x) => String(x.id) === testId);
+    if (!t) return res.status(404).json({ ok: false, error: "Тест не найден" });
+    const students = await tbl.list("Students");
+    const st = students.find((x) => samePhone(x.phone, b.phone));
+    const id = newId("Q");
+    const row = {
+      id, testId, title: t.title, phone: String(b.phone), name: (st && st.name) || b.name || "",
+      status: "assigned", answers: "", score: "", total: t.count || "0",
+      visible: b.sendCab === false ? "0" : "1",
+      createdAt: new Date().toISOString(), startedAt: "", finishedAt: "",
+    };
+    await tbl.append("TestAssign", row);
+    let tg = "";
+    if (b.sendTg !== false) {
+      let chatId = (st && st.chat_id) || "";
+      if (!chatId) { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, b.phone)); if (u) chatId = String(u.chat_id); }
+      if (chatId) {
+        const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
+        const base = PUBLIC_URL || `${proto}://${req.headers.host}`;
+        const link = `${base}/test.html?t=${id}`;
+        const r = await tgSend(chatId, `📝 Новый тест: «${t.title}»\nВопросов: ${t.count}\nПройти можно один раз — ${link}`);
+        tg = r.ok ? "sent" : "failed";
+      } else tg = "no-chat";
+    } else tg = "skipped";
+    res.json({ ok: true, assignment: { ...row, answers: undefined }, tg });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "assign failed" }); }
+});
+/** Результаты теста (только преподаватель): кто, когда, балл, ответы по вопросам */
+app.get("/api/admin/tests/results", needAdmin, async (req, res) => {
+  const testId = String(req.query.testId || "");
+  try {
+    const [tests, assigns] = await Promise.all([tbl.list("Tests"), tbl.list("TestAssign")]);
+    const t = tests.find((x) => String(x.id) === testId);
+    if (!t) return res.status(404).json({ ok: false, error: "Тест не найден" });
+    let questions = [];
+    try { questions = JSON.parse(t.questions || "[]"); } catch (e) {}
+    const rows = assigns.filter((a) => String(a.testId) === testId)
+      .sort((a, b) => String(a.createdAt) < String(b.createdAt) ? 1 : -1)
+      .map((a) => {
+        const answers = parseAssignAnswers(a);
+        const detail = questions.map((q, i) => {
+          const given = answers[i] ? answers[i].a : null;
+          const givenText = q.type === "input" ? (given == null ? "" : String(given))
+            : (Array.isArray(given) ? given : (given == null ? [] : [given])).map((x) => q.options[x] || ("#" + (+x + 1))).join(", ");
+          return { i, text: q.text, given: givenText || "—", ok: !!answers[i] && !!answers[i].ok };
+        });
+        return {
+          id: a.id, name: a.name, phone: a.phone, status: a.status || "assigned",
+          score: a.score === "" || a.score == null ? null : +a.score, total: +a.total || questions.length,
+          createdAt: a.createdAt, startedAt: a.startedAt || "", finishedAt: a.finishedAt || "", visible: a.visible !== "0",
+          answered: Object.keys(answers).length, detail,
+        };
+      });
+    res.json({ ok: true, test: { id: t.id, title: t.title, feedback: t.feedback !== "0", showScore: t.showScore !== "0" }, assignments: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: "results failed" }); }
+});
+
+/** Отменить попытку ученика: скрыть из кабинета и погасить ссылку (например, отправили не тому) */
+app.post("/api/admin/tests/cancel", needAdmin, async (req, res) => {
+  const id = String((req.body || {}).id || "");
+  try {
+    const a = (await tbl.list("TestAssign")).find((x) => String(x.id) === id);
+    if (!a) return res.status(404).json({ ok: false, error: "Попытка не найдена" });
+    await tbl.update("TestAssign", "id", id, { visible: "0", status: "cancelled", answers: "", score: "", startedAt: "", finishedAt: "" });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: "cancel failed" }); }
+});
+
+// --- тест: сторона ученика ---
+app.get("/api/test", async (req, res) => {
+  const t = String(req.query.t || "");
+  try {
+    const assigns = await tbl.list("TestAssign");
+    const a = assigns.find((x) => String(x.id) === t);
+    if (!a || a.visible === "0") return res.status(404).json({ ok: false, error: "Тест не найден. Попросите преподавателя прислать новую ссылку." });
+    const tests = await tbl.list("Tests");
+    const tst = tests.find((x) => String(x.id) === String(a.testId));
+    if (!tst) return res.status(404).json({ ok: false, error: "Тест удалён" });
+    let questions = [];
+    try { questions = JSON.parse(tst.questions || "[]"); } catch (e) {}
+    const answers = parseAssignAnswers(a);
+    const finished = a.status === "finished";
+    const showScore = tst.showScore !== "0";
+    const feedback = tst.feedback !== "0";
+    // что уже отвечено (без раскрытия правильности, если обратная связь выключена)
+    const answeredMap = {};
+    for (const k of Object.keys(answers)) answeredMap[k] = feedback ? { ok: !!answers[k].ok } : {};
+    res.json({
+      ok: true, title: tst.title, student: a.name || "", count: questions.length,
+      feedback, showScore,
+      status: finished ? "finished" : (Object.keys(answers).length ? "started" : "assigned"),
+      answered: Object.keys(answers).length,
+      answeredMap,
+      score: finished && showScore ? +a.score : null,
+      // вопросы БЕЗ правильных ответов — они не уходят на клиент, пока не получен ответ
+      questions: finished ? [] : questions.map((q) => ({ type: q.type, text: q.text, options: q.options || [], multi: !!q.multi })),
+    });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "test failed" }); }
+});
+app.post("/api/test/answer", async (req, res) => {
+  const b = req.body || {};
+  const t = String(b.t || ""), qi = Number(b.qi);
+  try {
+    const assigns = await tbl.list("TestAssign");
+    const a = assigns.find((x) => String(x.id) === t);
+    if (!a || a.visible === "0") return res.status(404).json({ ok: false, error: "Тест не найден" });
+    if (a.status === "finished") return res.status(409).json({ ok: false, error: "Тест уже пройден" });
+    const tests = await tbl.list("Tests");
+    const tst = tests.find((x) => String(x.id) === String(a.testId));
+    let questions = [];
+    try { questions = JSON.parse((tst && tst.questions) || "[]"); } catch (e) {}
+    const q = questions[qi];
+    if (!q) return res.status(400).json({ ok: false, error: "Нет такого вопроса" });
+    const answers = parseAssignAnswers(a);
+    if (answers[qi] != null) return res.status(409).json({ ok: false, error: "На этот вопрос уже есть ответ" });
+    // валидация ответа
+    if (q.type === "input") {
+      if (typeof b.answer !== "string" || !b.answer.trim()) return res.status(400).json({ ok: false, error: "Введите ответ" });
+    } else {
+      const arr = Array.isArray(b.answer) ? b.answer.map(Number) : [Number(b.answer)];
+      if (!arr.length || !arr.every((x) => Number.isInteger(x) && x >= 0 && x < q.options.length))
+        return res.status(400).json({ ok: false, error: "Выберите ответ" });
+    }
+    const ok = isCorrectAnswer(q, b.answer);
+    answers[qi] = { a: b.answer, ok, ts: new Date().toISOString() };
+    const started = a.status !== "started";
+    await tbl.update("TestAssign", "id", t, {
+      answers: JSON.stringify(answers), status: "started",
+      ...(started ? { startedAt: new Date().toISOString() } : {}),
+    });
+    const feedback = tst && tst.feedback !== "0";
+    const out = { ok: true, correct: feedback ? ok : undefined, answeredCount: Object.keys(answers).length };
+    if (feedback) {
+      out.correctAnswer = q.type === "input" ? q.answer : q.correct;
+      if (q.explanation) out.explanation = q.explanation;
+    }
+    res.json(out);
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "answer failed" }); }
+});
+app.post("/api/test/finish", async (req, res) => {
+  const t = String((req.body || {}).t || "");
+  try {
+    const assigns = await tbl.list("TestAssign");
+    const a = assigns.find((x) => String(x.id) === t);
+    if (!a || a.visible === "0") return res.status(404).json({ ok: false, error: "Тест не найден" });
+    const tests = await tbl.list("Tests");
+    const tst = tests.find((x) => String(x.id) === String(a.testId));
+    let questions = [];
+    try { questions = JSON.parse((tst && tst.questions) || "[]"); } catch (e) {}
+    const showScore = tst && tst.showScore !== "0";
+    if (a.status === "finished") {
+      return res.json({ ok: true, finished: true, total: questions.length, score: showScore ? +a.score : null, showScore });
+    }
+    const answers = parseAssignAnswers(a);
+    const score = questions.reduce((s, q, i) => s + (answers[i] && answers[i].ok ? 1 : 0), 0);
+    await tbl.update("TestAssign", "id", t, { status: "finished", score: String(score), total: String(questions.length), finishedAt: new Date().toISOString() });
+    notifyAdmin(`📝 Тест «${a.title}» завершён\n👤 ${a.name || ""} 📞 ${a.phone}\nРезультат: ${score} из ${questions.length}`);
+    res.json({ ok: true, finished: true, total: questions.length, score: showScore ? score : null, showScore });
+  } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "finish failed" }); }
 });
 
 // ---------- static ----------

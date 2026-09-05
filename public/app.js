@@ -8,7 +8,7 @@
     subjects: ["Математика", "Физика"], grades: [],
     subject: "", dates: [], date: "", slots: [], time: "",
     booking: false, tutorName: "Онлайн-уроки",
-    tzLabel: "МСК+2", tutorTg: "aviation09", chatId: "",
+    tzLabel: "МСК+2", tutorTg: "aviation09", chatId: "", botUsername: "",
     rescheduleHours: 12,
     resched: null, // { id, phone, subject, dsp, time } — режим переноса
   };
@@ -95,7 +95,7 @@
   async function loadSlots() {
     const grid = $("#slotsGrid"), hint = $("#slotsHint");
     grid.innerHTML = `<div class="spin">Загружаем свободное время… ⏳</div>`;
-    hint.textContent = "· " + fmtLong(state.date);
+    hint.textContent = `${fmtLong(state.date)} · время по ${state.tzLabel}`;
     try {
       const r = await fetch(`/api/slots?date=${state.date}&subject=${encodeURIComponent(state.subject || "")}`);
       const data = await r.json();
@@ -106,9 +106,8 @@
     } else {
       grid.innerHTML = state.slots.map((s) => {
         const free = isFree(s.status);
-        const dur = s.duration ? `<small> · ${s.duration} мин</small>` : "";
         return `<button class="slot" data-t="${s.time}" ${free ? "" : "disabled"}>
-          <b>${s.time}</b><small>${free ? "💻 " + state.tzLabel : slotLabel(s.status)}${free ? dur : ""}</small></button>`;
+          <b>${s.time}</b>${free ? "" : `<small>${slotLabel(s.status)}</small>`}</button>`;
       }).join("");
       $$("#slotsGrid .slot").forEach((b) => b.onclick = () => {
         if (b.disabled) return;
@@ -198,8 +197,13 @@
       s.classList.remove("hidden");
       $("#successTitle").textContent = "Вы записаны!";
       $("#successText").textContent =
-        `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}). Подтверждение придет на ${phone}.`;
-      $("#remindNote").textContent = "💡 Для напоминаний в Telegram откройте нашего бота и поделитесь номером телефона.";
+        `${state.subject}, ${fmtLong(state.date)} в ${state.time} (${state.tzLabel}).\nПодтверждение придёт на ${phone}.`;
+      if (state.botUsername) {
+        $("#remindNote").innerHTML =
+          `💡 Для напоминаний в Telegram откройте <a href="https://t.me/${state.botUsername}" target="_blank" rel="noopener">нашего бота</a> и поделитесь номером телефона.`;
+      } else {
+        $("#remindNote").textContent = "💡 Для напоминаний в Telegram откройте нашего бота\nи поделитесь номером телефона.";
+      }
       try { localStorage.setItem("myPhone", phone); } catch (e) {}
       s.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) {
@@ -300,11 +304,11 @@
       }
       if (cfg.contactsText) $("#contactsText").textContent = cfg.contactsText;
       if (cfg.bookingNote) $("#bookingNote").textContent = cfg.bookingNote;
-      if (cfg.tzLabel) { state.tzLabel = cfg.tzLabel; $("#tzLabel").textContent = cfg.tzLabel; }
+      if (cfg.tzLabel) { state.tzLabel = cfg.tzLabel; }
       if (cfg.tutorTg) { state.tutorTg = cfg.tutorTg; $("#contactTg").href = `https://t.me/${cfg.tutorTg}`; }
       if (cfg.rescheduleHours) { state.rescheduleHours = cfg.rescheduleHours; $("#reschedHoursSide").textContent = cfg.rescheduleHours; }
       if (cfg.cabinetEnabled === false) { $("#navCabinet").remove(); $$('a[href="/cabinet.html"]').forEach((a) => a.remove()); }
-      if (cfg.botUsername) { const a = $("#botLink"); a.href = `https://t.me/${cfg.botUsername}`; a.classList.remove("hidden"); }
+      if (cfg.botUsername) { state.botUsername = cfg.botUsername; const a = $("#botLink"); a.href = `https://t.me/${cfg.botUsername}`; a.classList.remove("hidden"); }
     } catch (e) {}
 
     const qs = new URLSearchParams(location.search);

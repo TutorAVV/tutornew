@@ -26,12 +26,12 @@
 </header>
 
 <main class="section">
-  <div class="wrap narrow">
-    <div id="loginBox" class="panel-lite">
+  <div class="wrap">
+    <div id="loginBox" class="panel-lite" style="max-width:520px;margin:0 auto">
       <h2>🎓 Кабинет ученика</h2>
       <p class="sub">Введите номер телефона, который указывали при записи. <span class="muted-sm">(тестовый режим: без пароля)</span></p>
       <div class="my-row">
-        <input id="cPhone" type="tel" placeholder="+7 999 123-45-67" inputmode="tel">
+        <input id="cPhone" type="tel" placeholder="+7 999 123-45-67" inputmode="tel" autocomplete="tel">
         <button class="btn btn-primary" id="cEnter">Войти</button>
       </div>
       <div class="form-err" id="cErr"></div>
@@ -57,6 +57,10 @@
         <div class="panel-lite">
           <h3>📨 От преподавателя</h3>
           <div id="cNotes"></div>
+        </div>
+        <div class="panel-lite">
+          <h3>📝 Задания (тесты)</h3>
+          <div id="cTests"></div>
         </div>
         <div class="panel-lite">
           <h3>📚 Пройденные темы</h3>
