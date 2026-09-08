@@ -1483,8 +1483,10 @@ app.patch("/api/admin/homework/:id", needAdmin, async (req, res) => {
       patch.deleted = "0";
     }
 
-    if (has("status")) {
-      const status = String(body.status || "");
+    // Edit/visibility clients may include an empty legacy `status` field. Treat
+    // it as absent so it cannot block an otherwise valid sparse update.
+    const status = has("status") ? String(body.status || "").trim() : "";
+    if (status) {
       if (!HOMEWORK_STATUSES.has(status)) return res.status(400).json({ ok: false, error: "Недопустимый статус задания" });
       patch.status = status;
       if (status === "revision") { patch.returnedAt = new Date().toISOString(); patch.completedAt = ""; }

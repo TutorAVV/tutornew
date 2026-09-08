@@ -1555,3 +1555,69 @@ body { min-width: 0; }
   .cab-homework-main b { font-size: 13px; }
   .cab-reschedule-lesson-options button { padding: 8px; }
 }
+
+/* Focused admin polish: keep the student card easy to scan and action dialogs
+   opaque enough that form controls never blend into the page behind them. */
+.adm-student-stats > div {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+.adm-student-stats > div:last-child b {
+  font-size: 15px;
+  letter-spacing: -.04em;
+}
+
+:root:not([data-theme="light"]) .adm-homework-modal.glass {
+  background: linear-gradient(142deg, #1a3159 0%, #0d1d38 52%, #09182f 100%);
+  border-color: rgba(181, 205, 255, .28);
+  box-shadow: 0 30px 85px rgba(0, 5, 24, .62), inset 0 1px rgba(255,255,255,.16);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root:not([data-theme="light"]) .adm-homework-modal .adm-modal-head {
+  background: #102343;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Give the parser actions a little breathing room before the next editor area
+   (and before the bottom edge when the test has not been parsed yet). */
+.adm-test-parse-actions { margin-bottom: 10px; padding-bottom: 6px; }
+.adm-test-parse-actions + .adm-editor-parsed { margin-top: 9px; }
+
+/* Native checkbox metrics differ noticeably between browser/OS combinations.
+   This compact custom control keeps every passed-topic checkbox identical. */
+.adm-topic-subject input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  min-height: 15px;
+  flex: 0 0 15px;
+  margin: 1px 0 0;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: rgba(255,255,255,.07);
+  place-content: center;
+}
+.adm-topic-subject input[type="checkbox"]::after {
+  width: 4px;
+  height: 7px;
+  content: "";
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  opacity: 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.adm-topic-subject input[type="checkbox"]:checked {
+  border-color: rgba(176,157,255,.75);
+  background: linear-gradient(135deg, var(--primary), var(--blue));
+}
+.adm-topic-subject input[type="checkbox"]:checked::after { opacity: 1; }
+:root[data-theme="light"] .adm-topic-subject input[type="checkbox"] { background: #fff; }
