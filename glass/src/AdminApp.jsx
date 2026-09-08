@@ -1182,7 +1182,12 @@ function HomeworkView({ request, notify, ask, students, ensureStudents, reloadSt
 
   return <section className="adm-page">
     <PageHeader eyebrow="Индивидуальные задания" title="Домашнее" accent="и прогресс." description="Выдавайте задание одному ученику, исправляйте его при необходимости и управляйте тем, что видно в кабинете." actions={<><button className="button button-quiet" type="button" onClick={() => Promise.all([loadHomework(), loadRoster({ force: true })]).catch(() => {})} disabled={state.loading || rosterState.loading}>{state.loading || rosterState.loading ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}Обновить</button><button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button></>} />
-    <div className="adm-metrics adm-homework-metrics">{[[totals.all, "всего заданий", totals.hidden ? `скрыто: ${totals.hidden}` : "по всем ученикам"], [totals.assigned, "ещё не открыли", "ждут ученика"], [totals.completed, "ждут проверки", "отметили выполнение"], [totals.accepted, "принято", "завершённые задания"]].map(([value, label, hint]) => <div className="glass" key={label}><b>{value}</b><span>{label}</span><small>{hint}</small></div>)}</div>
+    <section className="adm-metric-grid adm-homework-metrics">
+      <Metric icon={<ListTodo size={19} />} label="Всего заданий" value={totals.all} hint="Видны преподавателю" />
+      <Metric icon={<Sparkles size={19} />} label="Не открыто" value={totals.assigned} hint="Ждут ученика" tone="orange" />
+      <Metric icon={<Clock3 size={19} />} label="В работе" value={(totals.read || 0) + (totals.revision || 0)} hint="Прочитано или дорабатывается" tone="violet" />
+      <Metric icon={<CheckCircle2 size={19} />} label="Готово" value={(totals.completed || 0) + (totals.accepted || 0)} hint="Отмечено учеником" tone="mint" />
+    </section>
     <div className="adm-homework-layout adm-students-layout">
       <aside className="adm-homework-student-list adm-student-list glass">
         <div className="adm-homework-student-list-head adm-student-list-head"><div><b>Ученики</b><span>{roster.length} всего</span></div><label className="adm-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти ученика" /></label></div>
