@@ -59,6 +59,8 @@ const SLOT_STATUS = {
   past: "прошло",
 };
 
+const MOBILE_DATE_PAGE_SIZE = 5;
+
 function normaliseConfig(data = {}) {
   return {
     ...FALLBACK_CONFIG,
@@ -157,9 +159,17 @@ function dateParts(iso, index) {
   const month = date.toLocaleDateString("ru-RU", { month: "short", timeZone: "UTC" }).replace(".", "");
   return {
     label: index === 0 ? "сегодня" : index === 1 ? "завтра" : weekday,
+    shortLabel: index === 0 ? "сег" : index === 1 ? "зав" : weekday,
     day: date.getUTCDate(),
     month,
   };
+}
+
+function mobileDateRange(dates, page) {
+  const start = dates[page * MOBILE_DATE_PAGE_SIZE];
+  const end = dates[Math.min(dates.length - 1, (page + 1) * MOBILE_DATE_PAGE_SIZE - 1)];
+  if (!start || !end) return "Ближайшие дни";
+  return `${formatShortDate(start)} — ${formatShortDate(end)}`;
 }
 
 function compactLead(lead) {
@@ -184,8 +194,8 @@ function storedPhone() {
   try { return localStorage.getItem("myPhone") || ""; } catch (_error) { return ""; }
 }
 
-// The cabinet sends the learner back here as `/?phone=…#my-bookings` so the
-// reschedule list opens for the same person even when browser storage is empty.
+// The cabinet can link here with `/?phone=…#my-bookings` when a learner wants
+// to add another lesson, even when browser storage is empty.
 function phoneFromQuery() {
   try { return new URLSearchParams(window.location.search).get("phone") || ""; } catch (_error) { return ""; }
 }
@@ -218,6 +228,7 @@ function App() {
     try { return localStorage.getItem("glass-theme") || localStorage.getItem("theme") || "dark"; } catch (_error) { return "dark"; }
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileDatePage, setMobileDatePage] = useState(0);
   const dates = useMemo(() => buildDates(config.tzOffsetMin), [config.tzOffsetMin]);
   const [subject, setSubject] = useState(FALLBACK_CONFIG.subjects[0]);
   const [date, setDate] = useState(() => buildDates(FALLBACK_CONFIG.tzOffsetMin)[0]);
@@ -271,6 +282,13 @@ function App() {
 
   useEffect(() => {
     if (!dates.includes(date)) setDate(dates[0]);
+  }, [date, dates]);
+
+  // The desktop strip can comfortably scroll through all dates. On a phone we
+  // show a compact, paged group instead, so the picker never spills past the card.
+  useEffect(() => {
+    const index = dates.indexOf(date);
+    if (index >= 0) setMobileDatePage(Math.floor(index / MOBILE_DATE_PAGE_SIZE));
   }, [date, dates]);
 
   const loadSlots = useCallback(async () => {
@@ -468,7 +486,12 @@ function App() {
 
   const heroLines = compactLead(config.heroLead);
   const gradesLabel = config.grades.length ? "Школьная программа" : "Индивидуальный план";
-  const dateIndex = dates.indexOf(date);
+  const mobileDatePageCount = Math.max(1, Math.ceil(dates.length / MOBILE_DATE_PAGE_SIZE));
+  const visibleMobileDates = dates.slice(mobileDatePage * MOBILE_DATE_PAGE_SIZE, (mobileDatePage + 1) * MOBILE_DATE_PAGE_SIZE);
+
+  function moveMobileDatePage(delta) {
+    setMobileDatePage((current) => Math.max(0, Math.min(mobileDatePageCount - 1, current + delta)));
+  }
 
   return (
     <div className="app-shell">
@@ -592,6 +615,20 @@ function App() {
                       const parts = dateParts(item, index);
                       return <button key={item} className={`date-button ${date === item ? "selected" : ""}`} onClick={() => changeDate(item)} aria-pressed={date === item}><small>{parts.label}</small><b>{parts.day}</b><span>{parts.month}</span></button>;
                     })}
+                  </div>
+                  <div className="mobile-date-picker" aria-label="Даты для записи">
+                    <div className="mobile-date-picker-head">
+                      <button type="button" onClick={() => moveMobileDatePage(-1)} disabled={mobileDatePage === 0} aria-label="Показать предыдущие дни"><ChevronLeft size={17} /></button>
+                      <span>{mobileDateRange(dates, mobileDatePage)}</span>
+                      <button type="button" onClick={() => moveMobileDatePage(1)} disabled={mobileDatePage >= mobileDatePageCount - 1} aria-label="Показать следующие дни"><ChevronRight size={17} /></button>
+                    </div>
+                    <div className="mobile-date-grid">
+                      {visibleMobileDates.map((item) => {
+                        const index = dates.indexOf(item);
+                        const parts = dateParts(item, index);
+                        return <button type="button" key={item} className={date === item ? "selected" : ""} onClick={() => changeDate(item)} aria-pressed={date === item} aria-label={formatLongDate(item)}><small>{parts.shortLabel}</small><b>{parts.day}</b><span>{parts.month}</span></button>;
+                      })}
+                    </div>
                   </div>
                 </div>
 

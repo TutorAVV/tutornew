@@ -27,6 +27,7 @@ import {
   Sparkles,
   Sun,
   UserRound,
+  X,
 } from "lucide-react";
 
 const SESSION_KEY = "cabinetPhone";
@@ -35,13 +36,18 @@ const VIEWS = ["home", "schedule", "tests", "messages", "topics"];
 
 const DEFAULT_CONFIG = {
   tutorName: "Онлайн-уроки",
+  subjects: ["Математика", "Физика"],
   tzLabel: "МСК+2",
+  tzOffsetMin: 300,
+  lessonDuration: 50,
   rescheduleHours: 12,
   cabinetEnabled: true,
   botEnabled: false,
   botUsername: "",
   tutorTg: "",
 };
+
+const RESCHEDULE_DATE_PAGE_SIZE = 5;
 
 const LESSON_STATUS = {
   new: { label: "Ждёт подтверждения", short: "Ожидается", tone: "pending", Icon: Clock3 },
@@ -60,7 +66,10 @@ function normalizeConfig(data = {}) {
   return {
     ...DEFAULT_CONFIG,
     ...data,
+    subjects: Array.isArray(data.subjects) && data.subjects.length ? data.subjects : DEFAULT_CONFIG.subjects,
     cabinetEnabled: data.cabinetEnabled !== false && String(data.cabinetEnabled) !== "0",
+    tzOffsetMin: Number.isFinite(Number(data.tzOffsetMin)) ? Number(data.tzOffsetMin) : DEFAULT_CONFIG.tzOffsetMin,
+    lessonDuration: Number.isFinite(Number(data.lessonDuration)) ? Number(data.lessonDuration) : DEFAULT_CONFIG.lessonDuration,
     rescheduleHours: Number.isFinite(Number(data.rescheduleHours)) ? Number(data.rescheduleHours) : DEFAULT_CONFIG.rescheduleHours,
   };
 }
@@ -146,6 +155,42 @@ function todayIso() {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function tutorTodayIso(offsetMinutes) {
+  return new Date(Date.now() + Number(offsetMinutes || 0) * 60_000).toISOString().slice(0, 10);
+}
+
+function addIsoDays(iso, amount) {
+  const date = new Date(`${iso}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function availabilityDates(offsetMinutes, count = 45) {
+  const today = tutorTodayIso(offsetMinutes);
+  return Array.from({ length: count }, (_, index) => addIsoDays(today, index));
+}
+
+function availabilityDateParts(iso, index) {
+  const date = new Date(`${iso}T12:00:00Z`);
+  const weekday = date.toLocaleDateString("ru-RU", { weekday: "short", timeZone: "UTC" }).replace(".", "");
+  return {
+    day: date.getUTCDate(),
+    month: date.toLocaleDateString("ru-RU", { month: "short", timeZone: "UTC" }).replace(".", ""),
+    label: index === 0 ? "сег" : index === 1 ? "зав" : weekday,
+  };
+}
+
+function isFreeSlot(slot) {
+  return slot?.status === "open" || slot?.status === "free";
+}
+
+function slotAvailabilityLabel(slot) {
+  if (slot?.status === "booked" || slot?.status === "busy") return "занято";
+  if (slot?.status === "closed") return "закрыто";
+  if (slot?.status === "past") return "прошло";
+  return "недоступно";
+}
+
 function isoFor(year, month, day) {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
@@ -220,6 +265,7 @@ function CabinetApp() {
   const [sectionErrors, setSectionErrors] = useState({ lessons: "", tests: "", notes: "" });
   const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState(null);
+  const [rescheduleLesson, setRescheduleLesson] = useState(null);
   const [calendar, setCalendar] = useState(() => {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
@@ -365,6 +411,7 @@ function CabinetApp() {
     setLoginError("");
     setView("home");
     setSections({ lessons: null, tests: null, notes: null });
+    setRescheduleLesson(null);
     setScreen("login");
   }
 
@@ -379,6 +426,39 @@ function CabinetApp() {
       showNotice(error.message || "Не удалось обновить кабинет", "error");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  function openReschedule(lesson) {
+    if (!lesson?.id) {
+      showNotice("Не удалось определить занятие для переноса.", "error");
+      return;
+    }
+    if (lesson.canReschedule === false) {
+      showNotice(`Перенос доступен не позже чем за ${config.rescheduleHours} ч до занятия.`, "error");
+      return;
+    }
+    setRescheduleLesson(lesson);
+  }
+
+  async function syncAfterReschedule() {
+    setRescheduleLesson(null);
+    try {
+      const [summary, lessonResponse] = await Promise.all([
+        api(`/api/cabinet?phone=${encodeURIComponent(phone)}`),
+        sections.lessons !== null ? api(`/api/cabinet/lessons?phone=${encodeURIComponent(phone)}`) : Promise.resolve(null),
+      ]);
+      setData(summary);
+      if (lessonResponse) {
+        setSections((current) => ({ ...current, lessons: lessonResponse.lessons || [] }));
+        setSectionState((current) => ({ ...current, lessons: "ready" }));
+        setSectionErrors((current) => ({ ...current, lessons: "" }));
+      }
+      showNotice("Новое время занятия сохранено");
+    } catch (error) {
+      // The move already succeeded server-side. Keep that honest while making
+      // it easy to refresh the cabinet if its follow-up request had an issue.
+      showNotice("Занятие перенесено. Обновите кабинет, чтобы увидеть новое время.", "error");
     }
   }
 
@@ -432,6 +512,7 @@ function CabinetApp() {
             bookingUrl={bookingUrl}
             onNavigate={goTo}
             onRefresh={refreshHome}
+            onReschedule={openReschedule}
             refreshing={refreshing}
           />}
           {view === "schedule" && <ScheduleView
@@ -444,6 +525,7 @@ function CabinetApp() {
             selectedDay={selectedDay}
             setSelectedDay={setSelectedDay}
             config={config}
+            onReschedule={openReschedule}
           />}
           {view === "tests" && <TestsView
             tests={sections.tests}
@@ -461,6 +543,7 @@ function CabinetApp() {
         </section>
       </div>
     </main>
+    {rescheduleLesson && <RescheduleLessonModal lesson={rescheduleLesson} phone={phone} config={config} onClose={() => setRescheduleLesson(null)} onComplete={syncAfterReschedule} />}
     {notice && <div className={`cab-toast ${notice.tone === "error" ? "error" : ""}`} role="status">{notice.tone === "error" ? <CircleAlert size={16} /> : <CheckCircle2 size={16} />}{notice.message}</div>}
   </div>;
 }
@@ -503,10 +586,10 @@ function CabinetRail({ view, onNavigate, student, config, bookingUrl }) {
     ["messages", MessageCircle, "Сообщения"],
     ["topics", BookOpen, "Пройденное"],
   ];
-  return <aside className="cab-rail"><div className="cab-student-card glass"><span className="cab-avatar">{initialFor(student)}</span><div><small>Кабинет ученика</small><b>{student.name || "Ученик"}</b><p>{[student.grade, student.subject].filter(Boolean).join(" · ") || "Индивидуальный план"}</p></div></div><nav className="cab-nav" aria-label="Разделы кабинета">{items.map(([id, Icon, label]) => <button key={id} className={view === id ? "active" : ""} onClick={() => onNavigate(id)}><Icon size={18} /><span>{label}</span>{view === id && <i></i>}</button>)}</nav><a href={bookingUrl} className="cab-rail-cta"><span><CalendarDays size={17} /></span><div><b>Нужно другое время?</b><small>Записаться или перенести</small></div><ArrowRight size={15} /></a>{config.botEnabled && <div className="cab-telegram-hint"><Send size={15} /><span>Напоминания могут приходить в Telegram</span></div>}</aside>;
+  return <aside className="cab-rail"><div className="cab-student-card glass"><span className="cab-avatar">{initialFor(student)}</span><div><small>Кабинет ученика</small><b>{student.name || "Ученик"}</b><p>{[student.grade, student.subject].filter(Boolean).join(" · ") || "Индивидуальный план"}</p></div></div><nav className="cab-nav" aria-label="Разделы кабинета">{items.map(([id, Icon, label]) => <button key={id} className={view === id ? "active" : ""} onClick={() => onNavigate(id)}><Icon size={18} /><span>{label}</span>{view === id && <i></i>}</button>)}</nav><a href={bookingUrl} className="cab-rail-cta"><span><CalendarDays size={17} /></span><div><b>Нужно ещё занятие?</b><small>Выбрать свободное время</small></div><ArrowRight size={15} /></a>{config.botEnabled && <div className="cab-telegram-hint"><Send size={15} /><span>Напоминания могут приходить в Telegram</span></div>}</aside>;
 }
 
-function CabinetHome({ data, config, student, bookingUrl, onNavigate, onRefresh, refreshing }) {
+function CabinetHome({ data, config, student, bookingUrl, onNavigate, onRefresh, onReschedule, refreshing }) {
   const stats = data?.stats || {};
   const next = data?.next;
   const telegramUsername = String(config.botUsername || config.tutorTg || "").replace(/^@/, "");
@@ -523,9 +606,9 @@ function CabinetHome({ data, config, student, bookingUrl, onNavigate, onRefresh,
             ? "Всё готово к следующему шагу: проверьте ближайшее занятие или откройте нужный раздел."
             : "Здесь будут собраны ваши занятия, материалы и учебный прогресс."}</p>
           <div className="cab-welcome-actions">
-            <a className="button button-primary" href={bookingUrl}>
-              {next ? "Перенести занятие" : "Выбрать время"}<RotateCcw size={17} />
-            </a>
+            {next ? (next.canReschedule ? <button className="button button-primary" type="button" onClick={() => onReschedule(next)}>
+              Перенести занятие<RotateCcw size={17} />
+            </button> : <button className="button button-primary" type="button" onClick={() => onNavigate("schedule")}>Открыть расписание<CalendarDays size={17} /></button>) : <a className="button button-primary" href={bookingUrl}>Выбрать время<CalendarDays size={17} /></a>}
             <button className="button button-quiet" onClick={onRefresh} disabled={refreshing}>
               {refreshing ? <LoaderCircle className="spin" size={17} /> : <RefreshCw size={17} />}Обновить
             </button>
@@ -545,7 +628,7 @@ function CabinetHome({ data, config, student, bookingUrl, onNavigate, onRefresh,
       </section>
 
       <section className="cab-home-grid">
-        <NextLessonCard next={next} config={config} bookingUrl={bookingUrl} />
+        <NextLessonCard next={next} config={config} onReschedule={onReschedule} />
         <div className="cab-journey-card glass">
           <div className="cab-panel-title"><div>
             <span className="cab-card-icon blue"><Sparkles size={17} /></span>
@@ -578,18 +661,18 @@ function QuickAction({ icon, label, text, onClick }) {
   return <button className="cab-quick-action" onClick={onClick}><span>{icon}</span><div><b>{label}</b><small>{text}</small></div><ChevronRight size={17} /></button>;
 }
 
-function NextLessonCard({ next, config, bookingUrl }) {
+function NextLessonCard({ next, config, onReschedule }) {
   if (!next) return <article className="cab-next-card glass cab-next-empty"><div className="cab-panel-title"><div><span className="cab-card-icon mint"><CalendarDays size={17} /></span><div><small>Ближайшее занятие</small><h2>Пока нет записи</h2></div></div></div><div className="cab-empty-lesson"><span><CalendarDays size={25} /></span><p>Выберите удобное окно — оно сразу появится в вашем расписании.</p><a className="button button-primary" href="/#booking">Выбрать время <ArrowRight size={16} /></a></div></article>;
   const meta = statusFor(next.status);
   const StatusIcon = meta.Icon;
-  return <article className="cab-next-card glass"><div className="cab-panel-title"><div><span className="cab-card-icon mint"><CalendarDays size={17} /></span><div><small>Ближайшее занятие</small><h2>В расписании</h2></div></div><StatusPill status={next.status} compact /></div><div className="cab-next-lesson"><div className="cab-time-orb"><small>{next.dsp?.split(".").slice(0, 2).join(".") || "скоро"}</small><b>{next.time}</b><span>{config.tzLabel}</span></div><div><h3>{next.subject || "Занятие"}</h3><p>{next.dsp || "Дата уточняется"} · {next.time}</p><div className={`cab-next-status ${meta.tone}`}><StatusIcon size={14} />{meta.label}</div></div></div><div className="cab-next-footer"><span><Clock3 size={14} />Перенос — не позже чем за {dataSafeNumber(config.rescheduleHours, 12)} ч</span><a href={bookingUrl}>Изменить время <ArrowRight size={14} /></a></div></article>;
+  return <article className="cab-next-card glass"><div className="cab-panel-title"><div><span className="cab-card-icon mint"><CalendarDays size={17} /></span><div><small>Ближайшее занятие</small><h2>В расписании</h2></div></div><StatusPill status={next.status} compact /></div><div className="cab-next-lesson"><div className="cab-time-orb"><small>{next.dsp?.split(".").slice(0, 2).join(".") || "скоро"}</small><b>{next.time}</b><span>{config.tzLabel}</span></div><div><h3>{next.subject || "Занятие"}</h3><p>{next.dsp || "Дата уточняется"} · {next.time}</p><div className={`cab-next-status ${meta.tone}`}><StatusIcon size={14} />{meta.label}</div></div></div><div className="cab-next-footer"><span><Clock3 size={14} />Перенос — не позже чем за {dataSafeNumber(config.rescheduleHours, 12)} ч</span>{next.canReschedule ? <button type="button" onClick={() => onReschedule(next)}>Изменить время <ArrowRight size={14} /></button> : <small className="cab-next-unavailable"><Info size={13} />Срок переноса истёк</small>}</div></article>;
 }
 
 function dataSafeNumber(value, fallback) {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
 }
 
-function ScheduleView({ lessons, state, error, onReload, calendar, setCalendar, selectedDay, setSelectedDay, config }) {
+function ScheduleView({ lessons, state, error, onReload, calendar, setCalendar, selectedDay, setSelectedDay, config, onReschedule }) {
   const byDate = useMemo(() => {
     const result = {};
     (lessons || []).forEach((lesson) => {
@@ -622,11 +705,129 @@ function ScheduleView({ lessons, state, error, onReload, calendar, setCalendar, 
     const items = byDate[cell.iso] || [];
     const isToday = cell.iso === todayIso();
     return <button key={cell.iso} className={`cab-calendar-day ${cell.iso === selectedDay ? "selected" : ""} ${isToday ? "today" : ""}`} onClick={() => setSelectedDay(cell.iso)} aria-pressed={cell.iso === selectedDay}><b>{cell.day}</b><span>{items.slice(0, 2).map((lesson) => <i className={statusFor(lesson.status).tone} key={lesson.id || `${lesson.time}-${lesson.subject}`}>{lesson.time}</i>)}</span>{items.length > 2 && <small>+{items.length - 2}</small>}</button>;
-  })}</div><div className="cab-calendar-legend"><span><i className="pending"></i>ожидается</span><span><i className="confirmed"></i>подтверждено</span><span><i className="done"></i>проведено</span><span><i className="cancelled"></i>отменено</span></div></section><section className="cab-day-details"><div className="cab-day-heading"><div><small>{formatDate(selectedDay, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}</small><h2>{selectedLessons.length ? `Занятия: ${selectedLessons.length}` : "Нет занятий"}</h2></div></div>{selectedLessons.length ? <div className="cab-day-lessons">{selectedLessons.map((lesson) => <LessonRow key={lesson.id || `${lesson.iso}-${lesson.time}`} lesson={lesson} config={config} />)}</div> : <div className="cab-day-empty glass"><CalendarDays size={21} /><p>На эту дату занятий нет. Выберите другой день в календаре.</p></div>}</section></ViewFrame>;
+  })}</div><div className="cab-calendar-legend"><span><i className="pending"></i>ожидается</span><span><i className="confirmed"></i>подтверждено</span><span><i className="done"></i>проведено</span><span><i className="cancelled"></i>отменено</span></div></section><section className="cab-day-details"><div className="cab-day-heading"><div><small>{formatDate(selectedDay, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}</small><h2>{selectedLessons.length ? `Занятия: ${selectedLessons.length}` : "Нет занятий"}</h2></div></div>{selectedLessons.length ? <div className="cab-day-lessons">{selectedLessons.map((lesson) => <LessonRow key={lesson.id || `${lesson.iso}-${lesson.time}`} lesson={lesson} config={config} onReschedule={onReschedule} />)}</div> : <div className="cab-day-empty glass"><CalendarDays size={21} /><p>На эту дату занятий нет. Выберите другой день в календаре.</p></div>}</section></ViewFrame>;
 }
 
-function LessonRow({ lesson, config }) {
-  return <article className="cab-lesson-row glass"><div className="cab-lesson-time"><span>{lesson.dsp?.split(".").slice(0, 2).join(".") || formatDate(lesson.iso, { day: "numeric", month: "short" })}</span><b>{lesson.time}</b><small>{config.tzLabel}</small></div><div className="cab-lesson-copy"><h3>{lesson.subject || "Занятие"}</h3><p>{lesson.dsp || formatDate(lesson.iso, { day: "numeric", month: "long" })} · {lesson.time}</p><StatusPill status={lesson.status} /></div></article>;
+function LessonRow({ lesson, config, onReschedule }) {
+  return <article className="cab-lesson-row glass"><div className="cab-lesson-time"><span>{lesson.dsp?.split(".").slice(0, 2).join(".") || formatDate(lesson.iso, { day: "numeric", month: "short" })}</span><b>{lesson.time}</b><small>{config.tzLabel}</small></div><div className="cab-lesson-copy"><h3>{lesson.subject || "Занятие"}</h3><p>{lesson.dsp || formatDate(lesson.iso, { day: "numeric", month: "long" })} · {lesson.time}</p><StatusPill status={lesson.status} /></div>{lesson.canReschedule && <button className="cab-lesson-reschedule" type="button" onClick={() => onReschedule(lesson)}><RotateCcw size={15} />Перенести</button>}</article>;
+}
+
+function RescheduleLessonModal({ lesson, phone, config, onClose, onComplete }) {
+  const dates = useMemo(() => availabilityDates(config.tzOffsetMin), [config.tzOffsetMin]);
+  const [date, setDate] = useState(() => dates.includes(lesson.iso) ? lesson.iso : dates[0]);
+  const [page, setPage] = useState(() => Math.max(0, Math.floor(Math.max(0, dates.indexOf(lesson.iso)) / RESCHEDULE_DATE_PAGE_SIZE)));
+  const [slots, setSlots] = useState([]);
+  const [slotsState, setSlotsState] = useState("loading");
+  const [slotsError, setSlotsError] = useState("");
+  const [time, setTime] = useState("");
+  const [step, setStep] = useState("select");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const requestId = useRef(0);
+  const dialogRef = useRef(null);
+  const subject = lesson.subject || config.subjects[0] || "";
+  const pageCount = Math.max(1, Math.ceil(dates.length / RESCHEDULE_DATE_PAGE_SIZE));
+  const shownDates = dates.slice(page * RESCHEDULE_DATE_PAGE_SIZE, (page + 1) * RESCHEDULE_DATE_PAGE_SIZE);
+  const selectedLabel = date && time ? `${formatDate(date, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })} в ${time}` : "Выберите новую дату и свободное время";
+
+  useEffect(() => {
+    if (!dates.includes(date)) setDate(dates[0]);
+  }, [date, dates]);
+
+  useEffect(() => {
+    const index = dates.indexOf(date);
+    if (index >= 0) setPage(Math.floor(index / RESCHEDULE_DATE_PAGE_SIZE));
+  }, [date, dates]);
+
+  const loadSlots = useCallback(async () => {
+    if (!date) return;
+    const currentRequest = ++requestId.current;
+    setSlotsState("loading");
+    setSlotsError("");
+    try {
+      const response = await api(`/api/slots?date=${encodeURIComponent(date)}&subject=${encodeURIComponent(subject)}`);
+      if (currentRequest !== requestId.current) return;
+      const nextSlots = Array.isArray(response.slots) ? [...response.slots].sort((a, b) => String(a.time).localeCompare(String(b.time))) : [];
+      setSlots(nextSlots);
+      setTime((current) => nextSlots.some((slot) => slot.time === current && isFreeSlot(slot) && !(date === lesson.iso && slot.time === lesson.time)) ? current : "");
+      setSlotsState("ready");
+    } catch (loadError) {
+      if (currentRequest !== requestId.current) return;
+      setSlots([]);
+      setSlotsState("error");
+      setSlotsError(loadError.message || "Не удалось загрузить свободное время.");
+    }
+  }, [date, lesson.iso, lesson.time, subject]);
+
+  useEffect(() => { loadSlots(); }, [loadSlots]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    const focusTimer = window.setTimeout(() => dialogRef.current?.focus(), 30);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+      window.clearTimeout(focusTimer);
+    };
+  }, [onClose, saving]);
+
+  function chooseDate(nextDate) {
+    setDate(nextDate);
+    setTime("");
+    setStep("select");
+    setError("");
+  }
+
+  function movePage(delta) {
+    setPage((current) => Math.max(0, Math.min(pageCount - 1, current + delta)));
+  }
+
+  function chooseTime(nextTime) {
+    setTime(nextTime);
+    setError("");
+  }
+
+  function continueToConfirm() {
+    if (!time) { setError("Выберите свободное время для переноса."); return; }
+    if (date === lesson.iso && time === lesson.time) { setError("Это текущее время занятия — выберите другое окно."); return; }
+    setError("");
+    setStep("confirm");
+  }
+
+  async function submitReschedule() {
+    if (!time || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api("/api/reschedule", { method: "POST", body: JSON.stringify({ id: lesson.id, phone, date, time }) });
+      await onComplete({ ...lesson, iso: date, time, subject });
+    } catch (submitError) {
+      setError(submitError.message || "Не удалось перенести занятие.");
+      setTime("");
+      setStep("select");
+      loadSlots();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="cab-reschedule-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+    <section className="cab-reschedule-modal glass" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="cab-reschedule-title" tabIndex="-1">
+      <header className="cab-reschedule-modal-head"><div><span className="cab-eyebrow">Изменить занятие</span><h2 id="cab-reschedule-title">Новое время <em>без перехода.</em></h2></div><IconButton label="Закрыть окно переноса" onClick={onClose} disabled={saving}><X size={18} /></IconButton></header>
+      <div className="cab-reschedule-current"><span><CalendarDays size={19} /></span><div><small>Сейчас в расписании</small><b>{subject || "Занятие"}</b><p>{lesson.dsp || formatDate(lesson.iso, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })} · {lesson.time} ({config.tzLabel})</p></div></div>
+      {step === "select" && <div className="cab-reschedule-picker">
+        <section className="cab-reschedule-step"><div className="cab-reschedule-step-title"><span>01</span><div><b>Новая дата</b><small>Выберите удобный день</small></div></div><div className="cab-reschedule-date-head"><button type="button" onClick={() => movePage(-1)} disabled={page === 0} aria-label="Предыдущие дни"><ChevronLeft size={17} /></button><b>{formatDate(shownDates[0], { day: "numeric", month: "short", timeZone: "UTC" })} — {formatDate(shownDates[shownDates.length - 1], { day: "numeric", month: "short", timeZone: "UTC" })}</b><button type="button" onClick={() => movePage(1)} disabled={page >= pageCount - 1} aria-label="Следующие дни"><ChevronRight size={17} /></button></div><div className="cab-reschedule-dates">{shownDates.map((item) => { const index = dates.indexOf(item); const parts = availabilityDateParts(item, index); return <button type="button" key={item} className={date === item ? "selected" : ""} onClick={() => chooseDate(item)} aria-pressed={date === item} aria-label={formatDate(item, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}><small>{parts.label}</small><b>{parts.day}</b><span>{parts.month}</span></button>; })}</div></section>
+        <section className="cab-reschedule-step"><div className="cab-reschedule-step-title"><span>02</span><div><b>Свободное время</b><small>{formatDate(date, { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })} · {config.tzLabel}</small></div><button className="cab-reschedule-reload" type="button" onClick={loadSlots} aria-label="Обновить свободное время"><RefreshCw size={15} /></button></div>{slotsState === "loading" && <div className="cab-reschedule-loading" role="status"><LoaderCircle className="spin" size={19} /><div><b>Ищем свободные окна</b><small>Проверяем актуальное расписание</small></div></div>}{slotsState === "error" && <div className="cab-reschedule-error"><CircleAlert size={17} /><span>{slotsError}</span><button type="button" onClick={loadSlots}>Повторить</button></div>}{slotsState === "ready" && !slots.length && <div className="cab-reschedule-empty"><CalendarDays size={19} /><b>На этот день свободных окон нет</b><span>Попробуйте соседний день.</span></div>}{slotsState === "ready" && Boolean(slots.length) && <div className="cab-reschedule-slots">{slots.map((slot) => { const currentSlot = date === lesson.iso && slot.time === lesson.time; const available = isFreeSlot(slot) && !currentSlot; return <button type="button" key={`${slot.time}-${slot.status}`} className={`${time === slot.time ? "selected" : ""} ${available ? "" : "unavailable"}`} disabled={!available} onClick={() => chooseTime(slot.time)}><b>{slot.time}</b><small>{available ? `${slot.duration || config.lessonDuration} мин` : currentSlot ? "текущее" : slotAvailabilityLabel(slot)}</small>{time === slot.time && <Check size={15} />}</button>; })}</div>}</section>
+        <div className={`cab-reschedule-selection ${time ? "ready" : ""}`}><span><RotateCcw size={17} /></span><div><small>Новое время</small><b>{selectedLabel}</b></div></div>{error && <div className="cab-reschedule-form-error" role="alert"><CircleAlert size={16} />{error}</div>}<footer className="cab-reschedule-actions"><button className="button button-quiet" type="button" onClick={onClose} disabled={saving}>Отмена</button><button className="button button-primary" type="button" onClick={continueToConfirm} disabled={!time || slotsState !== "ready"}>Продолжить <ArrowRight size={17} /></button></footer>
+      </div>}
+      {step === "confirm" && <div className="cab-reschedule-confirm"><span><RotateCcw size={26} /></span><small className="cab-eyebrow">Проверьте изменения</small><h3>Перенести занятие?</h3><p>Старое окно освободится, а новое время сразу появится в вашем расписании.</p><div className="cab-reschedule-transfer"><div><small>Было</small><b>{lesson.dsp || formatDate(lesson.iso)} · {lesson.time}</b></div><ArrowRight size={17} /><div><small>Станет</small><b>{formatDate(date)} · {time}</b></div></div>{error && <div className="cab-reschedule-form-error" role="alert"><CircleAlert size={16} />{error}</div>}<footer className="cab-reschedule-actions"><button className="button button-quiet" type="button" onClick={() => { setStep("select"); setError(""); }} disabled={saving}>Изменить выбор</button><button className="button button-primary" type="button" onClick={submitReschedule} disabled={saving}>{saving ? <LoaderCircle className="spin" size={17} /> : <RotateCcw size={17} />}{saving ? "Переносим…" : "Подтвердить перенос"}</button></footer></div>}
+    </section>
+  </div>;
 }
 
 function TestsView({ tests, state, error, onReload }) {

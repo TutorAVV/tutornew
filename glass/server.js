@@ -590,6 +590,20 @@ async function cabinetLessons(phone) {
   }
   return [...map.values()].filter((b) => b.iso).sort((a, b) => (a.iso + a.time < b.iso + b.time ? -1 : 1));
 }
+/** The cabinet needs the same transfer eligibility that the public "My lessons"
+ *  flow shows. The server remains the authority on POST /api/reschedule; this
+ *  only lets the React cabinet offer the right in-place action. */
+function decorateCabinetLessons(list, cfg) {
+  return (list || []).map((lesson) => {
+    const hours = hoursUntil(lesson.iso, lesson.time, cfg.tzOffsetMin);
+    const active = lesson.status !== "cancelled" && lesson.status !== "done";
+    return {
+      ...lesson,
+      hoursLeft: Number.isFinite(hours) ? Math.round(hours * 10) / 10 : null,
+      canReschedule: active && Number.isFinite(hours) && hours >= cfg.rescheduleHours,
+    };
+  });
+}
 /** Тесты ученика (для кабинета и отдельной страницы) */
 function buildMyTests(phone, assigns, tests) {
   const testById = new Map(tests.map((t) => [String(t.id), t]));
@@ -656,10 +670,11 @@ app.get("/api/cabinet", async (req, res) => {
   try {
     const cfg = await publicConfig();
     if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
-    const [students, bookings, notes, users, assigns, tests, lessons] = await Promise.all([
+    const [students, bookings, notes, users, assigns, tests, rawLessons] = await Promise.all([
       tbl.list("Students"), allBookings(), tbl.list("Notes"), tbl.list("Users"),
       tbl.list("TestAssign"), tbl.list("Tests"), cabinetLessons(phone),
     ]);
+    const lessons = decorateCabinetLessons(rawLessons, cfg);
     const st = students.find((x) => samePhone(x.phone, phone));
     const mine = bookings.filter((b) => samePhone(b.phone, phone));
     if (!st && !mine.length) return res.status(404).json({ ok: false, error: "Ученик с таким номером не найден. Сначала запишитесь на занятие." });
@@ -677,7 +692,10 @@ app.get("/api/cabinet", async (req, res) => {
         subject: studentSubjects(st, mine).join(" · "), topics: (st && st.topics) || "", phone: (st && st.phone) || lastB.phone || phone,
       },
       stats: studentStats(phone, bookings, cfg),
-      next: next ? { id: next.id, dsp: next.dsp, time: next.time, subject: next.subject, status: next.status } : null,
+      next: next ? {
+        id: next.id, iso: next.iso, dsp: next.dsp, time: next.time, subject: next.subject, status: next.status,
+        canReschedule: next.canReschedule, hoursLeft: next.hoursLeft,
+      } : null,
       upcomingTotal: upcoming.length,
       testsCount: myTests.length, notesCount: myNotes.length,
       tgLinked,
@@ -696,8 +714,8 @@ async function cabinetSection(req, res, build) {
     res.json(await build(cfg));
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "cabinet section failed" }); }
 }
-app.get("/api/cabinet/lessons", (req, res) => cabinetSection(req, res, async () => ({
-  ok: true, lessons: await cabinetLessons(req.query.phone || ""),
+app.get("/api/cabinet/lessons", (req, res) => cabinetSection(req, res, async (cfg) => ({
+  ok: true, lessons: decorateCabinetLessons(await cabinetLessons(req.query.phone || ""), cfg),
 })));
 app.get("/api/cabinet/tests", (req, res) => cabinetSection(req, res, async () => {
   const [assigns, tests] = await Promise.all([tbl.list("TestAssign"), tbl.list("Tests")]);
