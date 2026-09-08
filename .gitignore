@@ -1,7 +1,9 @@
 node_modules/
 dist/
 data/*.json
+glass/data/*.json
 !data/.gitkeep
+!glass/data/.gitkeep
 .env
 /test-results/
 /playwright-report/

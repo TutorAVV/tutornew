@@ -269,7 +269,17 @@ h3 { font-size: 20px; }
 .slot-button.selected svg { position: absolute; top: 7px; right: 7px; color: #c9ffe9; }
 .slot-button.unavailable { color: var(--faint); cursor: not-allowed; border-color: rgba(157, 178, 218, .08); background: rgba(8, 17, 36, .12); opacity: .55; }
 :root[data-theme="light"] .slot-button.unavailable { background: rgba(130, 151, 185, .07); }
-.slot-skeleton span { min-height: 63px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,.035), rgba(255,255,255,.13), rgba(255,255,255,.035)); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.slots-loading { padding: 13px; border: 1px solid rgba(116, 192, 255, .2); border-radius: 17px; background: linear-gradient(105deg, rgba(75, 148, 220, .09), rgba(130, 94, 240, .1)); }
+.slots-loading-caption { display: flex; align-items: center; gap: 9px; color: var(--ink-soft); }
+.slots-loading-caption b, .slots-loading-caption p { display: block; }
+.slots-loading-caption b { font-size: 12px; }
+.slots-loading-caption p { margin: 1px 0 0; color: var(--muted); font-size: 10px; }
+.loading-orbit { display: inline-flex; align-items: center; justify-content: center; width: 31px; height: 31px; flex: 0 0 auto; color: var(--blue); border: 1px solid rgba(121, 207, 255, .23); border-radius: 11px; background: rgba(76, 169, 233, .1); }
+.loading-orbit svg { animation: spin 1s linear infinite; }
+.slot-skeleton { margin-top: 12px; }
+.slot-skeleton span { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; min-height: 63px; border: 1px solid rgba(181, 207, 255, .11); border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,.035), rgba(255,255,255,.13), rgba(255,255,255,.035)); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.slot-skeleton i { display: block; width: 42px; height: 11px; border-radius: 99px; background: rgba(219, 231, 255, .38); }
+.slot-skeleton em { display: block; width: 30px; height: 6px; border-radius: 99px; background: rgba(192, 212, 255, .2); }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .slots-message { display: flex; align-items: flex-start; gap: 10px; padding: 15px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: 15px; background: rgba(255,255,255,.025); }
 .slots-message > svg { flex: 0 0 auto; margin-top: 2px; color: var(--blue); }

@@ -59,11 +59,6 @@ const SLOT_STATUS = {
   past: "прошло",
 };
 
-function getRuntimeConfig() {
-  if (typeof window === "undefined") return {};
-  return window.__GLASS_CONFIG__ || {};
-}
-
 function normaliseConfig(data = {}) {
   return {
     ...FALLBACK_CONFIG,
@@ -181,10 +176,8 @@ function isFree(slot) {
   return slot?.status === "open" || slot?.status === "free";
 }
 
-function legacyHref(path) {
-  const runtime = getRuntimeConfig();
-  const base = String(runtime.legacySiteUrl || "").replace(/\/$/, "");
-  return base ? `${base}${path}` : path;
+function internalHref(path) {
+  return path;
 }
 
 function storedPhone() {
@@ -212,7 +205,7 @@ function App() {
   const [config, setConfig] = useState(FALLBACK_CONFIG);
   const [configReady, setConfigReady] = useState(false);
   const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem("glass-theme") || "dark"; } catch (_error) { return "dark"; }
+    try { return localStorage.getItem("glass-theme") || localStorage.getItem("theme") || "dark"; } catch (_error) { return "dark"; }
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const dates = useMemo(() => buildDates(config.tzOffsetMin), [config.tzOffsetMin]);
@@ -240,7 +233,12 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#071326" : "#e8f0ff");
-    try { localStorage.setItem("glass-theme", theme); } catch (_error) { /* storage is optional */ }
+    try {
+      // `theme` is also used by the cabinet and test pages, so all routes keep
+      // one visual preference even though the public page is React.
+      localStorage.setItem("glass-theme", theme);
+      localStorage.setItem("theme", theme);
+    } catch (_error) { /* storage is optional */ }
   }, [theme]);
 
   useEffect(() => {
@@ -484,7 +482,7 @@ function App() {
           </nav>
 
           <div className="header-actions">
-            {config.cabinetEnabled && <a className="header-cabinet" href={legacyHref("/cabinet.html")}>Кабинет <ArrowUpRight size={14} /></a>}
+            {config.cabinetEnabled && <a className="header-cabinet" href={internalHref("/cabinet.html")}>Кабинет <ArrowUpRight size={14} /></a>}
             <IconButton label={theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему"} onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}>
               {theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
             </IconButton>
@@ -589,7 +587,7 @@ function App() {
 
                 <div className="booking-step slots-step">
                   <div className="step-title"><span>03</span><div><b>Время</b><small>{date ? `${formatLongDate(date)} · ${config.tzLabel}` : "Выберите дату"}</small></div>{slotsState === "loading" && <LoaderCircle className="mini-loader" size={17} />}</div>
-                  {slotsState === "loading" && <div className="slot-grid slot-skeleton" aria-label="Загружаем свободное время">{Array.from({ length: 6 }, (_, index) => <span key={index}></span>)}</div>}
+                  {slotsState === "loading" && <div className="slots-loading" role="status" aria-live="polite"><div className="slots-loading-caption"><span className="loading-orbit"><LoaderCircle size={17} /></span><div><b>Ищем свободные окна</b><p>Обновляем расписание на выбранную дату</p></div></div><div className="slot-grid slot-skeleton" aria-hidden="true">{Array.from({ length: 6 }, (_, index) => <span key={index}><i></i><em></em></span>)}</div></div>}
                   {slotsState === "error" && <div className="slots-message is-error"><CircleAlert size={18} /><div><b>Время пока не загрузилось</b><p>{slotsError}</p></div><button className="text-button" onClick={loadSlots}>Повторить</button></div>}
                   {slotsState === "ready" && !slots.length && <div className="slots-message"><CalendarDays size={19} /><div><b>На этот день пока нет окон</b><p>Выберите другую дату — расписание постоянно обновляется.</p></div></div>}
                   {slotsState === "ready" && Boolean(slots.length) && <div className="slot-grid">
@@ -651,7 +649,7 @@ function App() {
         </section>
       </main>
 
-      <footer className="site-footer"><div className="container footer-inner"><a className="brand" href="#top"><BrandMark /><span>{config.tutorName}</span></a><p>© {new Date().getFullYear()} · Индивидуальные онлайн-занятия</p><div className="footer-links">{config.cabinetEnabled && <a href={legacyHref("/cabinet.html")}>Кабинет ученика <ExternalLink size={13} /></a>}<a href={legacyHref("/admin.html")}>Администратору <ExternalLink size={13} /></a></div></div></footer>
+      <footer className="site-footer"><div className="container footer-inner"><a className="brand" href="#top"><BrandMark /><span>{config.tutorName}</span></a><p>© {new Date().getFullYear()} · Индивидуальные онлайн-занятия</p><div className="footer-links">{config.cabinetEnabled && <a href={internalHref("/cabinet.html")}>Кабинет ученика <ExternalLink size={13} /></a>}<a href={internalHref("/admin.html")}>Администратору <ExternalLink size={13} /></a></div></div></footer>
 
       {confirmReschedule && reschedule && <div className="modal-backdrop" role="presentation"><div className="glass confirm-modal" role="dialog" aria-modal="true" aria-labelledby="reschedule-dialog-title"><IconButton label="Закрыть" className="modal-close" onClick={() => setConfirmReschedule(false)}><X size={18} /></IconButton><span className="modal-symbol"><RotateCcw size={21} /></span><h3 id="reschedule-dialog-title">Подтвердить перенос?</h3><p>Старое время освободится, а выбранное окно будет закреплено за вами.</p><div className="transfer-summary"><div><small>Было</small><b>{displayDate(reschedule.booking)} · {reschedule.booking.time}</b></div><ArrowRight size={17} /><div><small>Станет</small><b>{formatShortDate(date)} · {time}</b></div></div><div className="modal-actions"><button className="button button-quiet" onClick={() => setConfirmReschedule(false)}>Вернуться</button><button className="button button-primary" onClick={submitReschedule} disabled={submitting}>{submitting ? <LoaderCircle className="spin" size={17} /> : "Перенести"}<ArrowRight size={17} /></button></div></div></div>}
     </div>

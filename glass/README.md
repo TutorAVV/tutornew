@@ -1,59 +1,76 @@
 # Tutor Booking Glass
 
-A standalone **React + Vite** renovation of the public booking page. It is intentionally isolated from the existing `tutornew` service so the working production site, Google Sheets, Telegram bot, admin panel, and student cabinet remain untouched.
+Полностью самостоятельная современная версия Tutor Booking: **React + Node.js** и единый визуальный стиль liquid glass. Папка самодостаточна: в ней есть сервер, API, демо-хранилище, копия Google Apps Script, React-главная и стили для всех остальных страниц.
 
-## What stays exactly where it is
+## Какие страницы входят
 
-- Booking, availability, rescheduling, notifications, Sheets, and Telegram logic stay in the existing Tutor Booking server.
-- `/admin.html`, `/cabinet.html`, and `/telegram.html` remain on that existing service and are linked from this new UI.
-- This frontend only proxies the public endpoints it needs: config, slots, booking, lookup, and rescheduling. It does **not** duplicate secrets or expose admin endpoints.
-
-## Local preview
-
-In one terminal, start the existing project:
-
-```bash
-cd ..
-npm ci
-ADMIN_KEY=admin123 npm start
-```
-
-In another terminal, run the React UI:
-
-```bash
-cp .env.example .env
-npm ci
-npm run dev
-```
-
-Open `http://localhost:4173`. Vite forwards relative `/api` calls to `API_ORIGIN` (by default `http://localhost:3000`).
-
-To test the production-style proxy instead:
-
-```bash
-npm run build
-API_ORIGIN=http://localhost:3000 LEGACY_SITE_URL=http://localhost:3000 PORT=4173 npm start
-```
-
-## Separate GitHub repository + Render service
-
-This directory is self-contained by design. Copy **the contents of `glass/`** into a new repository (for example `tutor-booking-glass`) and use its included `render.yaml` as the Render Blueprint.
-
-In the new Render service set these two non-secret environment variables:
-
-| Variable | Value |
+| Адрес | Что открывается |
 | --- | --- |
-| `API_ORIGIN` | Public URL of the existing working Tutor Booking Render service, e.g. `https://current-tutor.onrender.com` |
-| `LEGACY_SITE_URL` | Usually the same URL; this is where Cabinet, Telegram Mini App, and Admin links should open. |
+| `/` | Новая React-главная: слоты, запись, поиск по номеру и перенос занятия |
+| `/cabinet.html` или `/cabinet` | Кабинет ученика в том же glass-стиле |
+| `/admin.html` или `/admin` | Админ-панель в том же glass-стиле |
+| `/telegram.html` или `/telegram` | Telegram WebApp: запись и перенос в том же glass-стиле |
+| `/test.html?t=…` или `/test?t=…` | Страница теста ученика в том же glass-стиле |
 
-Render builds the React application, then starts `server.js`. That tiny server serves the static files and forwards only the public booking API calls to `API_ORIGIN`; therefore the browser always uses relative `/api/...` URLs and no API key, Sheet URL, bot token, or admin password is copied into the new service.
+Вся бизнес-логика находится в `server.js`. Кабинет, админка, Telegram и тест сохраняют проверенное JavaScript-поведение — файл `public/legacy-glass.css` меняет их интерфейс без рискованной переписи сложных сценариев. Главная страница — новое React-приложение из `src/`.
 
-Health endpoint: `/healthz`.
+## Независимая схема работы
 
-### Deploy directly from this repository instead
+```text
+браузер
+  ├── React-главная
+  ├── кабинет / админка / Telegram / тесты
+  └── те же адреса /api/…
+                         ↓
+             server.js из этой папки
+                         ↓
+    Google Apps Script + Google Sheets (production)
+    или data/db.json (локальный демо-режим)
+```
 
-`../render.glass.yaml` is an optional Blueprint configured with `rootDir: glass`. Use it only when you explicitly want Render to deploy this subdirectory from the existing repository. It creates a second service and does not modify the original `tutor-booking` service.
+Здесь нет прокси к старому Render-сайту и нет зависимости от его URL. После переключения новый сервис может работать, даже когда старый Render-сайт выключен.
 
-## Before switching links or Telegram
+## Локальный запуск
 
-Leave the original service's `PUBLIC_URL` unchanged while you review the Glass site. This guarantees current bot webhooks and old links keep working. Once the new UI is approved, you can decide separately whether public links should point at the new Render URL.
+```bash
+cd glass
+cp .env.example .env
+# заполните .env при необходимости
+npm ci
+npm run build
+npm start
+```
+
+Откройте `http://localhost:3000`. Для входа в админку укажите в `.env` значение `ADMIN_KEY`.
+
+Для быстрой работы только с React-главной оставьте `npm start` на порту `3000` в одном терминале и запустите `npm run dev` во втором. Vite передаст его относительные запросы `/api` в этот самостоятельный сервер. Полную проверку лучше делать через `npm start`, потому что тогда доступны также `/admin.html`, `/cabinet.html`, `/telegram.html` и `/test.html`.
+
+> Если `APPS_SCRIPT_URL` пустой, включается демо-режим и данные пишутся в `data/db.json`. Диск Render не является постоянным хранилищем, поэтому для production обязательно подключите Google Sheets / Apps Script.
+
+## Новый GitHub-репозиторий + новый Render-сервис
+
+1. Создайте новый репозиторий, например `tutor-booking-glass`.
+2. Перенесите **содержимое этой папки `glass/`** в корень нового репозитория. Нужны в том числе `.gitignore`, `package-lock.json`, `render.yaml`, `public/` и `google-apps-script/`.
+3. В Render откройте **New → Blueprint**, подключите новый репозиторий и создайте сервис по `render.yaml`.
+4. В Environment задайте значения из `.env.example`:
+   - `ADMIN_KEY` — новый надёжный пароль админки;
+   - `APPS_SCRIPT_URL`, `API_SECRET`, `SHEET_URL` — подключение к Google Sheets;
+   - `BOT_TOKEN`, `ADMIN_CHAT_ID` — если используется Telegram;
+   - `PUBLIC_URL` — новый адрес вида `https://…onrender.com` после первого деплоя.
+5. Откройте `https://новый-сайт/admin.html`, войдите с `ADMIN_KEY`, затем перейдите в **Telegram → Подключить вебхук**. Это переведёт бота на новый сервис.
+
+### Как подключить Google Sheets
+
+- **Перенести работающие данные на новый сайт:** укажите существующий URL Apps Script и в `API_SECRET` поставьте в точности тот же секрет, что прописан в Apps Script. Старый Render-сервер для Apps Script не нужен, поэтому после переключения его можно выключить.
+- **Сделать полностью отдельный тестовый контур:** скопируйте Google-таблицу, создайте новое развертывание Apps Script из `google-apps-script/Code.gs`, укажите новый `API_SECRET` и используйте новый URL развертывания в Render.
+
+Пока оба сайта подключены к одной таблице, расписание, записи и настройки админки будут общими. Для параллельной проверки это нормально.
+
+### Переключение Telegram
+
+У Telegram может быть только один webhook на бота. Пока новый дизайн проверяется, не меняйте `PUBLIC_URL` у старого сайта. В момент переключения заполните `PUBLIC_URL` нового Render-сервиса и в его админке нажмите **Telegram → Подключить вебхук**. После этого бот, напоминания, ответы и новые ссылки на тесты будут работать через новый сайт.
+
+## Проверка состояния
+
+- `GET /healthz` — быстрый health-check для Render;
+- `GET /api/health` — health-check бизнес-API.

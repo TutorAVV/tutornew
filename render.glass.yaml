@@ -1,5 +1,6 @@
 # Optional Blueprint when deploying the /glass folder directly from this repository.
-# It creates a SEPARATE Render service; the existing tutor-booking service is untouched.
+# It creates a NEW, fully independent Tutor Booking Glass service; the existing
+# tutor-booking service and its render.yaml are not changed.
 services:
   - type: web
     name: tutor-booking-glass
@@ -10,7 +11,31 @@ services:
     startCommand: npm start
     healthCheckPath: /healthz
     envVars:
-      - key: API_ORIGIN
+      - key: ADMIN_KEY
         sync: false
-      - key: LEGACY_SITE_URL
+      - key: API_SECRET
         sync: false
+      - key: APPS_SCRIPT_URL
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: SHEET_URL
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: TUTOR_NAME
+        value: Онлайн-уроки
+      - key: TUTOR_PHONE
+        sync: false
+      - key: TUTOR_SUBJECTS
+        value: Математика,Физика
+      - key: TZ_LABEL
+        value: МСК+2
+      - key: TUTOR_TG
+        value: aviation09
+      - key: LESSON_DURATION
+        value: "50"
+      - key: RESCHEDULE_HOURS
+        value: "12"

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Тест — Онлайн-уроки</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legacy-glass.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+</head>
+<body class="glass-legacy test-page dark">
+<header class="header">
+  <div class="wrap header-in">
+    <a class="logo" href="/">📐 <span id="logoName">Онлайн-уроки</span></a>
+    <nav class="nav">
+      <a href="/cabinet.html">← В кабинет</a>
+    </nav>
+    <div class="header-cta">
+      <button class="theme-btn" id="themeBtn">🌙 Тёмная тема</button>
+    </div>
+  </div>
+</header>
+
+<main class="section test-page">
+  <div class="wrap wrap-narrow">
+    <h1 class="test-title" id="tTitle">Тест</h1>
+    <div class="test-student hidden" id="tName"></div>
+    <div class="test-meta muted-sm" id="tMeta"></div>
+
+    <div class="quiz-card panel-lite" id="quiz">
+      <div class="muted">Загрузка… ⏳</div>
+    </div>
+
+    <div class="no-copy-hint muted-sm hidden" id="tNoCopyHint">🔒 Копирование вопросов и вариантов отключено преподавателем.</div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-in">
+    <div>© <span id="year"></span> <span id="footName">Онлайн-уроки</span></div>
+    <div class="footer-links"><a href="/">На главную</a></div>
+  </div>
+</footer>
+<script src="/test.js"></script>
+</body>
+</html>

@@ -1,5 +1,6 @@
-# Standalone Render Blueprint for this React frontend.
-# Use this file after publishing the CONTENTS of /glass as a separate repository.
+# Standalone Render Blueprint for Tutor Booking Glass.
+# Publish the CONTENTS of /glass as a separate repository, then create a
+# Blueprint from this file. This service includes its own API and React UI.
 services:
   - type: web
     name: tutor-booking-glass
@@ -9,10 +10,34 @@ services:
     startCommand: npm start
     healthCheckPath: /healthz
     envVars:
-      # URL of the existing Tutor Booking service. It retains Sheets, Telegram,
-      # admin credentials, and all booking logic.
-      - key: API_ORIGIN
+      # Set values marked `sync: false` in Render. Do not copy them into Git.
+      - key: ADMIN_KEY
         sync: false
-      # Existing site URL for pages intentionally left on the legacy service.
-      - key: LEGACY_SITE_URL
+      - key: API_SECRET
         sync: false
+      - key: APPS_SCRIPT_URL
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: SHEET_URL
+        sync: false
+      # Set this to the NEW Render URL after its first deploy, then reconnect
+      # the Telegram webhook in Admin → Telegram.
+      - key: PUBLIC_URL
+        sync: false
+      - key: TUTOR_NAME
+        value: Онлайн-уроки
+      - key: TUTOR_PHONE
+        sync: false
+      - key: TUTOR_SUBJECTS
+        value: Математика,Физика
+      - key: TZ_LABEL
+        value: МСК+2
+      - key: TUTOR_TG
+        value: aviation09
+      - key: LESSON_DURATION
+        value: "50"
+      - key: RESCHEDULE_HOURS
+        value: "12"

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Админ-панель — Онлайн-уроки</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/legacy-glass.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠</text></svg>">
+</head>
+<body class="glass-legacy admin-page dark">
+<div class="admin-wrap">
+  <div id="loginView">
+    <div class="login-card">
+      <div style="font-size:44px">🔐</div>
+      <h2>Админ-панель</h2>
+      <p class="muted">Пароль — из Render → Environment → <span class="kbd">ADMIN_KEY</span></p>
+      <div class="form" style="text-align:left">
+        <label>Пароль<input id="adminPass" type="password" placeholder="••••••••" autocomplete="current-password"></label>
+        <button class="btn btn-primary btn-block" id="loginBtn">Войти</button>
+        <div class="form-err" id="loginErr"></div>
+      </div>
+      <p><a href="/" class="muted">← На сайт</a></p>
+    </div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <div class="admin-top">
+      <h1>🛠 Админ-панель <span class="muted-sm" id="storageBadge"></span></h1>
+      <div class="spacer"></div>
+      <a class="mini-btn" id="sheetLink" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none">📊 Google Таблица</a>
+      <a class="mini-btn" href="/" style="text-decoration:none">← На сайт</a>
+      <button class="mini-btn" id="adminThemeBtn" type="button" aria-label="Переключить тему">☀️</button>
+      <button class="mini-btn" id="logoutBtn">Выйти</button>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="schedule">🗓 Расписание</button>
+      <button class="tab" data-tab="bookings">📋 Заявки</button>
+      <button class="tab" data-tab="slots">➕ Слоты</button>
+      <button class="tab" data-tab="students">🎓 Ученики</button>
+      <button class="tab" data-tab="tests">📝 Тесты</button>
+      <button class="tab" data-tab="tg">✈️ Telegram <span class="pill p-new hidden" id="tgUnread"></span></button>
+      <button class="tab" data-tab="settings">⚙️ Настройки</button>
+      <button class="tab" data-tab="help">❓ Помощь</button>
+    </div>
+
+    <!-- SCHEDULE -->
+    <div class="panel" id="tab-schedule">
+      <div class="toolbar">
+        <input id="schFrom" type="date"> — <input id="schTo" type="date">
+        <select id="schStatus">
+          <option value="">все</option><option value="open">свободные</option>
+          <option value="booked">занятые</option><option value="closed">закрытые</option>
+        </select>
+        <button class="mini-btn" id="schLoad">Показать</button>
+        <button class="mini-btn" id="schCal">📅 Календарь</button>
+        <button class="mini-btn" id="schCsv">⬇ CSV</button>
+      </div>
+      <div class="toolbar">
+        <button class="mini-btn" id="cleanupBtn">🧹 Удалить прошедшие (кроме занятых)</button>
+        <span class="muted-sm">Очистить диапазон:</span>
+        <input id="clrFrom" type="date"> — <input id="clrTo" type="date">
+        <button class="mini-btn" id="clrClose">Закрыть</button>
+        <button class="mini-btn danger" id="clrDelete">Удалить</button>
+      </div>
+      <p class="muted-sm">По умолчанию — ближайшие 2 недели. Для другого периода выберите даты и нажмите «Показать».</p>
+      <div id="schDays"><div class="muted">Загрузка расписания…</div></div>
+
+      <!-- Календарь расписания (pop-up) -->
+      <div class="modal hidden" id="calModal" role="dialog" aria-modal="true" aria-labelledby="calModalTitle">
+        <div class="modal-card modal-card-wide">
+          <div class="modal-head">
+            <h3 id="calModalTitle" style="margin:0">📅 Календарь расписания</h3>
+            <button class="mini-btn" id="calClose" title="Закрыть">✕</button>
+          </div>
+          <div id="calModalBody"></div>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="calGoDay">Перейти к дню в списке</button>
+            <button class="btn btn-primary btn-sm" id="calDone">Готово</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOOKINGS -->
+    <div class="panel hidden" id="tab-bookings">
+      <div class="toolbar">
+        <select id="fStatus">
+          <option value="">Все статусы</option>
+          <option value="new">Новые</option>
+          <option value="confirmed">Подтверждённые</option>
+          <option value="done">Завершённые</option>
+          <option value="cancelled">Отменённые</option>
+        </select>
+        <input id="fSearch" type="text" placeholder="Поиск: имя, телефон, предмет…">
+        <button class="mini-btn" id="reloadBookings">🔄 Обновить</button>
+        <button class="mini-btn" id="exportCsv">⬇ CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="tbl" id="bookTable">
+        <thead><tr><th>Дата/время</th><th>Ученик</th><th>Предмет</th><th>Статус</th><th>Действия</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted">Загрузка…</td></tr></tbody>
+      </table>
+      </div>
+    </div>
+
+    <!-- SLOTS -->
+    <div class="panel hidden" id="tab-slots">
+      <h3>Добавить слот</h3>
+      <div class="toolbar">
+        <input id="slotDate" type="date">
+        <input id="newTime" type="time" value="17:00">
+        <input id="newDur" type="number" value="50" min="15" max="240" step="5" style="width:90px" title="Длительность, мин">
+        <span class="muted-sm">мин</span>
+        <button class="mini-btn" id="addSlot">＋ Добавить</button>
+      </div>
+      <h3>Массово на диапазон</h3>
+      <div class="toolbar">
+        <input id="genFrom" type="date"> — <input id="genTo" type="date">
+      </div>
+      <div class="toolbar">
+        <span class="muted-sm">Будни Пн–Пт:</span>
+        <input id="wdFrom" type="time" value="16:00"> — <input id="wdTo" type="time" value="20:00">
+      </div>
+      <div class="toolbar">
+        <span class="muted-sm">Выходные Сб–Вс:</span>
+        <input id="weFrom" type="time" value="10:00"> — <input id="weTo" type="time" value="13:00">
+      </div>
+      <div class="toolbar">
+        <span class="muted-sm">Длительность:</span>
+        <input id="genDur" type="number" value="50" min="15" max="240" step="5" style="width:80px">
+        <span class="muted-sm">мин · Шаг:</span>
+        <input id="genStep" type="number" value="60" min="15" max="240" step="5" style="width:80px">
+        <span class="muted-sm">мин</span>
+        <label class="muted-sm"><input type="checkbox" id="genKeep" checked> не изменять существующие</label>
+        <button class="mini-btn" id="genBtn">⚡ Сгенерировать</button>
+      </div>
+      <div class="muted-sm">Или точное время через запятую (вместо окон): <input id="genTimes" type="text" placeholder="16:00,17:00,18:00" style="min-width:200px"></div>
+    </div>
+
+    <!-- STUDENTS -->
+    <div class="panel hidden" id="tab-students">
+      <div class="toolbar">
+        <input id="stSearch" type="text" placeholder="Поиск: имя, телефон, класс…">
+        <button class="mini-btn" id="stReload">🔄 Обновить</button>
+        <span class="muted-sm" id="stCount"></span>
+      </div>
+      <div class="split split-wide">
+        <div class="split-list" id="stList"><div class="muted">Загрузка…</div></div>
+        <div class="split-detail" id="stDetail"><div class="muted">Выберите ученика слева. Карточка создаётся автоматически при первой записи.</div></div>
+      </div>
+
+      <!-- выбор пройденных тем из списка -->
+      <div class="modal hidden" id="topicsModal">
+        <div class="modal-card" style="max-width:880px">
+          <h3>📚 Пройденные темы</h3>
+          <p class="muted-sm" id="topicsModalInfo"></p>
+          <div class="toolbar" style="margin-bottom:10px">
+            <button class="mini-btn" id="topicsNone">Очистить выбор</button>
+            <span class="muted-sm">Отмеченные темы подставятся в поле «Пройденные темы» — ручной ввод по-прежнему работает</span>
+          </div>
+          <div id="topicsModalBody" style="max-height:58vh;overflow:auto;padding:4px 2px"></div>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="topicsCancel">Отмена</button>
+            <button class="btn btn-primary btn-sm" id="topicsSave">✅ Подставить в поле</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TESTS -->
+    <div class="panel hidden" id="tab-tests">
+      <div class="split">
+        <div class="split-list" style="max-height:none">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="mini-btn" id="tstReload">🔄</button>
+            <button class="mini-btn" id="tstNew">＋ Создать тест</button>
+          </div>
+          <div id="tstList"><div class="muted">Загрузка…</div></div>
+        </div>
+        <div class="split-detail" id="tstDetail">
+          <div class="muted">
+            <h3 style="margin-top:0">📝 Тесты для учеников</h3>
+            <p class="muted-sm">Вставьте готовый тест (из учебника, сайта или сгенерированный ИИ) — сайт сам разберёт вопросы, варианты и ответы и соберёт аккуратный тест. Каждому ученику отправляется своя одноразовая ссылка: пройти тест можно только один раз, а правильные ответы не видны до ответа.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- отправка теста ученику -->
+      <div class="modal hidden" id="tstSendModal">
+        <div class="modal-card">
+          <h3>📤 Отправить тест: <span id="tstSendTitle"></span></h3>
+          <label style="font-weight:700;font-size:14px;display:block;margin-top:10px">Ученик
+            <select id="tstSendStudent" style="width:100%;margin-top:6px;border:1.5px solid var(--line);border-radius:10px;padding:9px 12px;font-family:inherit"></select>
+          </label>
+          <p class="muted-sm" id="tstSendNoStudents" style="display:none">Учеников пока нет — сначала нужна хотя бы одна запись.</p>
+          <div class="toolbar" style="margin-top:12px">
+            <label class="chk"><input type="checkbox" id="tstSendCab" checked> в кабинет</label>
+            <label class="chk" id="tstSendTgWrap"><input type="checkbox" id="tstSendTg" checked> в Telegram</label>
+          </div>
+          <p class="muted-sm">У каждого ученика — своя ссылка и одна попытка. Ученик увидит тест в кабинете и/или получит сообщение от бота.</p>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="tstSendCancel">Отмена</button>
+            <button class="btn btn-primary btn-sm" id="tstSendGo">Отправить</button>
+          </div>
+          <div class="form-err" id="tstSendErr"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TELEGRAM -->
+    <div class="panel hidden" id="tab-tg">
+      <div id="tgStatus" class="muted-sm" style="margin-bottom:12px">Проверяем бота…</div>
+      <div class="split">
+        <div class="split-list">
+          <div class="toolbar" style="margin-bottom:8px">
+            <button class="mini-btn" id="tgReload">🔄</button>
+            <button class="mini-btn" id="tgBroadcastBtn">📢 Рассылка всем</button>
+          </div>
+          <div id="tgUsers"><div class="muted">Загрузка…</div></div>
+        </div>
+        <div class="split-detail">
+          <div id="tgChatHead" class="muted">Выберите пользователя слева — здесь появится переписка. Пользователи попадают сюда после /start в боте.</div>
+          <div class="chat" id="tgChat"></div>
+          <div class="chat-send hidden" id="tgSendBox">
+            <textarea id="tgText" rows="3" placeholder="Сообщение от бота этому человеку…"></textarea>
+            <button class="btn btn-primary" id="tgSend">Отправить</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- broadcast dialog -->
+      <div class="modal hidden" id="bcModal">
+        <div class="modal-card">
+          <h3>📢 Массовая рассылка</h3>
+          <p class="muted-sm">Сообщение получат <b id="bcCount">0</b> пользователей бота (все, кто нажимал /start и не заблокировал бота). Отменить отправку после нажатия нельзя.</p>
+          <textarea id="bcText" rows="5" placeholder="Например: Здравствуйте! Сегодня заболел(а), занятия на 5 сентября переносятся. Выберите новое время на сайте или напишите мне."></textarea>
+          <label class="muted-sm" style="display:block;margin-top:10px">Для подтверждения введите слово <b>РАЗОСЛАТЬ</b>
+            <input id="bcConfirm" type="text" placeholder="РАЗОСЛАТЬ" autocomplete="off" style="display:block;margin-top:6px;width:100%">
+          </label>
+          <div class="toolbar" style="margin-top:14px;justify-content:flex-end">
+            <button class="mini-btn" id="bcCancel">Отмена</button>
+            <button class="btn btn-primary" id="bcSend" disabled>Отправить всем</button>
+          </div>
+          <div class="form-err" id="bcErr"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="panel hidden" id="tab-settings">
+      <p class="muted-sm">Эти настройки применяются к сайту сразу после сохранения, без правки кода и без перезапуска (хранятся в таблице, лист <span class="kbd">Settings</span>). Секреты (токен бота, пароль админки, ссылка на скрипт) остаются в Render → Environment.</p>
+      <div id="settingsForm" class="settings-grid"><div class="muted">Загрузка…</div></div>
+      <div class="toolbar" style="margin-top:14px">
+        <button class="btn btn-primary" id="setSave">💾 Сохранить</button>
+        <button class="mini-btn" id="setReset">Сбросить к значениям по умолчанию</button>
+        <span class="muted-sm" id="setMsg"></span>
+      </div>
+      <h3 style="margin-top:22px">Состояние подключений</h3>
+      <div id="envState" class="muted-sm"></div>
+    </div>
+
+    <!-- HELP -->
+    <div class="panel hidden" id="tab-help">
+      <h3>Где лежат данные</h3>
+      <p id="storageText" class="muted"></p>
+      <p class="muted-sm">Листы таблицы: <span class="kbd">Slots</span> (слоты), <span class="kbd">Bookings</span> (заявки), <span class="kbd">Settings</span> (настройки сайта), <span class="kbd">Users</span> (пользователи бота), <span class="kbd">Messages</span> (переписка/рассылки), <span class="kbd">Students</span> (карточки учеников), <span class="kbd">Notes</span> (домашки/сообщения в кабинет), <span class="kbd">Tests</span> + <span class="kbd">TestAssign</span> (тесты и попытки учеников — отдельные листы, основную БД не засоряют), <span class="kbd">TopicCatalog</span> (свой список пройденных тем для чекбоксов: колонки <span class="kbd">subject</span>, <span class="kbd">grade</span>, <span class="kbd">topics</span> через запятую; если лист пуст — используется встроенный список 4–9 классов). Все листы создаются автоматически. Колонка <span class="kbd">format</span> в Bookings не используется — её можно удалить.</p>
+
+      <h3>📝 Тесты: как готовить</h3>
+      <ol class="side-list">
+        <li>Вкладка <b>Тесты</b> → «Создать тест». В форме есть блок <b>🤖 Промпт для ИИ</b>: заполните предмет/класс/тему/количество вопросов → «Скопировать промпт» → вставьте в ChatGPT/Claude/Gemini. ИИ ответит текстом, который сайт сам разберёт (строки «Ответ: б» и «Пояснение: …» подхватываются автоматически).</li>
+        <li>Или вставьте готовый тест из учебника/сайта → «Разобрать». Понимаются форматы: «1. Вопрос / а) вариант / Ответ: б», ключ в конце («Ответы: 1-б, 2-а»), вопросы с открытым ответом («Ответ: 3,14») и JSON.</li>
+        <li>Проверьте предпросмотр (правильные варианты отмечены зелёным) и сохраните. Настройки теста: показ ученику правильности после каждого ответа, итоговый балл, запрет копирования текста и количество попыток (по умолчанию 1 — можно, например, 3).</li>
+        <li>Сохранённый тест можно править в любой момент: «✏️ Редактировать» — название, вопросы (JSON), настройки. Ученик, который ещё не начал, увидит новую версию.</li>
+        <li>«Отправить ученику» — создаст персональную ссылку <span class="kbd">/test.html?t=…</span>: тест появится в кабинете и/или придёт от бота в Telegram. Правильные ответы не видны до ответа на каждый вопрос.</li>
+        <li>Результаты — кнопка «Результаты» у теста: кто начал/закончил, сколько попыток, балл и ответ на каждый вопрос. Когда ученик завершает тест, вам приходит уведомление в Telegram.</li>
+      </ol>
+
+      <h3>✏️ Как поправить ФИО ученика</h3>
+      <p class="muted-sm">Вкладка <b>Ученики</b> → карточка → поле «ФИО ученика» → «Сохранить». Новое имя автоматически подставится в заявки и расписание — в таблицу лазить не нужно.</p>
+
+      <h3>⚠️ Ошибка «You can't set the number format of cells in a typed column»</h3>
+      <p class="muted-sm">В таблице у колонки <span class="kbd">date</span> или <span class="kbd">time</span> включён «тип колонки» (Sheets → таблица/типизированная колонка). Код v3 это обходит автоматически — просто обновите <span class="kbd">Code.gs</span> и сделайте <b>Новую версию</b> развертывания. Если хотите убрать причину: выделите колонки date/time → Формат → Число → Обычный текст, либо преобразуйте «таблицу» обратно в диапазон.</p>
+
+      <h3>⚠️ Слоты есть в таблице, но их нет на сайте</h3>
+      <ol class="side-list">
+        <li>Убедитесь, что в Apps Script вставлен <b>актуальный</b> <span class="kbd">Code.gs</span> из репозитория (вверху написано «v3»).</li>
+        <li>После изменения кода: <b>Развернуть → Управление развертываниями → ✏️ → Новая версия</b>. Без этого сайт видит старый код!</li>
+        <li>Проверьте <span class="kbd">SHEET_ID</span> и <span class="kbd">API_SECRET</span> (= как в Render).</li>
+        <li>Диагностика: откройте <span class="kbd">/api/slots?date=ГГГГ-ММ-ДД</span> — должен прийти JSON. Если <span class="kbd">forbidden</span> — не совпадает API_SECRET.</li>
+      </ol>
+
+      <h3>Telegram-бот: уведомления, рассылки, напоминания</h3>
+      <ol class="side-list">
+        <li>@BotFather → /newbot → токен в Render → <span class="kbd">BOT_TOKEN</span>. Свой chat id (@userinfobot) → <span class="kbd">ADMIN_CHAT_ID</span>. Адрес сайта → <span class="kbd">PUBLIC_URL</span>.</li>
+        <li>Вкладка <b>Telegram</b> → «Подключить вебхук» (один раз). После этого бот отвечает на /start, просит поделиться номером, а все сообщения учеников попадают в админку.</li>
+        <li>Чтобы напоминания приходили ученику, он должен нажать /start в боте и <b>поделиться номером</b> — номер связывается с его записями.</li>
+        <li>Для самих напоминаний: в <span class="kbd">Code.gs</span> заполните <span class="kbd">BOT_TOKEN</span> и <span class="kbd">ADMIN_CHAT_ID</span>, в редакторе выберите функцию <span class="kbd">createReminderTrigger</span> → ▶️ → разрешите доступ. За сколько минут напоминать — в Настройках.</li>
+        <li>@BotFather → /setmenubutton → адрес <span class="kbd">https://ваш-сайт/telegram.html</span> — кнопка «приложение» в боте.</li>
+      </ol>
+
+      <h3>Перенос и отмена занятий</h3>
+      <p class="muted-sm">Ученик может только <b>записаться</b> и <b>перенести</b> занятие (не позже чем за N часов — задаётся в Настройках). <b>Отменить</b> может только преподаватель: вкладка Заявки → «Отменить» (слот освобождается, ученику уходит сообщение в Telegram, если он привязан).</p>
+
+      <h3>Личный кабинет ученика</h3>
+      <p class="muted-sm">Страница <span class="kbd">/cabinet.html</span>, вход по номеру телефона (тестовый режим, без пароля; сессия хранится — при обновлении страницы вход не нужен). Вкладки: <b>Главная</b> (ближайшее занятие, статистика, «Перенести занятие»), <b>Расписание</b> (календарь всех занятий — прошедших и будущих), <b>Тесты</b>, <b>Сообщения</b> (домашки/ссылки), <b>Темы</b>. Разделы подгружаются при открытии. Отключить кабинет можно в Настройках.</p>
+
+      <h3>Если что-то сломалось</h3>
+      <ol class="side-list">
+        <li>Сайт не открывается / долго грузится — free-тариф Render «засыпает», первый визит 30–60 сек. Логи: Render → Logs.</li>
+        <li>Ошибка при записи — проверьте, что Apps Script развернут <b>новой версией</b> и доступ «Все».</li>
+        <li>Не приходят уведомления — проверьте BOT_TOKEN/ADMIN_CHAT_ID (в Render и в Code.gs) и что вы нажали /start в боте.</li>
+        <li>Сбросить настройки сайта — Настройки → «Сбросить», либо очистить лист Settings.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<script src="/admin.js"></script>
+</body>
+</html>

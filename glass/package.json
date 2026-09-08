@@ -2,7 +2,7 @@
   "name": "tutor-booking-glass",
   "version": "1.0.0",
   "private": true,
-  "description": "Standalone React liquid-glass frontend for Tutor Booking",
+  "description": "Standalone React liquid-glass Tutor Booking site with its own API",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
@@ -10,6 +10,8 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
