@@ -639,7 +639,7 @@ function TestCard({ test }) {
   const description = test.status === "finished"
     ? (test.showScore && test.score != null ? `Результат: ${test.score} из ${test.total}` : "Ответы отправлены преподавателю")
     : test.status === "started" ? `Отвечено ${test.answered || 0} из ${test.total}` : `Вопросов: ${test.total}`;
-  return <article className="cab-test-card glass"><div className="cab-test-top"><span className="cab-card-icon violet"><FileText size={18} /></span><span className={`cab-status ${status.tone}`}>{status.label}</span></div><h2>{test.title}</h2><p>{description}</p><div className="cab-test-meta"><span><ListTodo size={14} />{test.maxAttempts > 1 ? `Попыток: ${test.attempts || 0} из ${test.maxAttempts}` : "Одна попытка"}</span>{test.finishedAt && <span><CheckCircle2 size={14} />{formatDateTime(test.finishedAt)}</span>}</div><a className="button button-primary" href={`/test.html?t=${encodeURIComponent(test.id)}`}>{actionText}<ArrowRight size={16} /></a></article>;
+  return <article className="cab-test-card glass"><div className="cab-test-top"><span className="cab-card-icon violet"><FileText size={18} /></span><span className={`cab-status ${status.tone}`}>{status.label}</span></div><h2>{test.title}</h2><p>{description}</p><div className="cab-test-meta"><span><ListTodo size={14} />{test.maxAttempts > 1 ? `Попыток: ${test.attempts || 0} из ${test.maxAttempts}` : "Одна попытка"}</span>{test.finishedAt && <span><CheckCircle2 size={14} />{formatDateTime(test.finishedAt)}</span>}</div><a className="button button-primary" href={`/test?t=${encodeURIComponent(test.id)}`}>{actionText}<ArrowRight size={16} /></a></article>;
 }
 
 function MessagesView({ notes, state, error, onReload }) {

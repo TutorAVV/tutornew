@@ -335,7 +335,7 @@ async function handleTgUpdate(upd) {
   const from = msg.from || { id: msg.chat.id };
   const cfg = await publicConfig();
   const base = PUBLIC_URL || "";
-  const appBtn = base ? { inline_keyboard: [[{ text: "📅 Записаться на занятие", web_app: { url: `${base}/telegram.html` } }]] } : undefined;
+  const appBtn = base ? { inline_keyboard: [[{ text: "📅 Записаться на занятие", web_app: { url: `${base}/telegram` } }]] } : undefined;
 
   if (msg.contact) {
     const phone = msg.contact.phone_number || "";
@@ -1458,7 +1458,7 @@ app.post("/api/admin/tests/assign", needAdmin, async (req, res) => {
       if (chatId) {
         const proto = (req.headers["x-forwarded-proto"] || "https").split(",")[0];
         const base = PUBLIC_URL || `${proto}://${req.headers.host}`;
-        const link = `${base}/test.html?t=${id}`;
+        const link = `${base}/test?t=${id}`;
         const tries = maxAttempts > 1 ? `Попыток: до ${maxAttempts} — ` : "Пройти можно один раз — ";
         const r = await tgSend(chatId, `📝 Новый тест: «${t.title}»\nВопросов: ${t.count}\n${tries}${link}`);
         tg = r.ok ? "sent" : "failed";
@@ -1487,7 +1487,7 @@ app.get("/api/admin/tests/results", needAdmin, async (req, res) => {
         }));
         return {
           id: a.id, name: a.name, phone: a.phone, guest: String((a.guest) || "") === "1", status: a.status || "assigned",
-          link: `/test.html?t=${encodeURIComponent(a.id)}`,
+          link: `/test?t=${encodeURIComponent(a.id)}`,
           score: a.score === "" || a.score == null ? null : +a.score, total: +a.total || questions.length,
           createdAt: a.createdAt, startedAt: a.startedAt || "", finishedAt: a.finishedAt || "", visible: flagOn(a.visible),
           attempts: Math.max(0, +a.attempts || 0),
@@ -1704,23 +1704,29 @@ app.post("/api/test/retry", async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ ok: false, error: "retry failed" }); }
 });
 
-// ---------- static React shell + legacy-compatible page assets ----------
-// Vite copies glass/public/* into dist during build. The landing page, student
-// cabinet and administrator workspace share the React shell; the Telegram and
-// test pages keep their established explicit legacy-compatible URLs.
+// ---------- static React shell ----------
+// The landing page, student cabinet, administrator workspace, Telegram WebApp
+// and student test runner share the same React shell. Their established URLs
+// remain stable so saved links and Telegram buttons continue to work.
 const DIST_DIR = path.join(__dirname, "dist");
 const REACT_SHELL = path.join(DIST_DIR, "index.html");
 app.get("/healthz", (req, res) => res.json({ ok: true, service: "tutor-booking-glass", time: new Date().toISOString() }));
 // These must precede express.static: the .html aliases intentionally render
 // the React app rather than a stale standalone static document.
-app.get(["/cabinet", "/cabinet.html", "/admin", "/admin.html"], (req, res) => res.sendFile(REACT_SHELL));
+app.get([
+  "/cabinet", "/cabinet.html",
+  "/admin", "/admin.html",
+  "/telegram", "/telegram.html",
+  "/test", "/test.html",
+], (req, res) => res.sendFile(REACT_SHELL));
 app.use(express.static(DIST_DIR, { extensions: ["html"] }));
-app.get("/telegram", (req, res) => res.sendFile(path.join(DIST_DIR, "telegram.html")));
-app.get("/test", (req, res) => res.sendFile(path.join(DIST_DIR, "test.html")));
 // Keep client-side React routes future-proof. API routes are all registered
 // above, so an unknown non-API GET may safely render the landing shell.
 app.use((req, res) => {
   if (req.method !== "GET" && req.method !== "HEAD") return res.status(404).json({ ok: false, error: "not found" });
+  // Do not turn a missing JavaScript/CSS/image file into HTML. Page aliases
+  // above are explicit; other extension paths are genuinely absent assets.
+  if (path.extname(req.path)) return res.status(404).json({ ok: false, error: "not found" });
   res.sendFile(REACT_SHELL);
 });
 

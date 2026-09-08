@@ -1176,7 +1176,7 @@ function AssignTestModal({ test, students, request, notify, onClose, onSent }) {
     try {
       const data = await request("/api/admin/tests/assign", { method: "POST", body: JSON.stringify({ testId: test.id, phone: guest ? "" : target, guest, sendCab, sendTg: guest ? false : sendTg }) });
       const where = guest ? "по персональной ссылке" : [sendCab ? "в кабинет" : "", sendTg && data.tg === "sent" ? "в Telegram" : ""].filter(Boolean).join(" и ") || "в кабинет";
-      const link = `${window.location.origin}/test.html?t=${data.assignment.id}`;
+      const link = `${window.location.origin}/test?t=${data.assignment.id}`;
       await copyText(link);
       notify(`Тест отправлен ${where}. Ссылка скопирована.`);
       await onSent();
