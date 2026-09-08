@@ -184,6 +184,16 @@ function storedPhone() {
   try { return localStorage.getItem("myPhone") || ""; } catch (_error) { return ""; }
 }
 
+// The cabinet sends the learner back here as `/?phone=…#my-bookings` so the
+// reschedule list opens for the same person even when browser storage is empty.
+function phoneFromQuery() {
+  try { return new URLSearchParams(window.location.search).get("phone") || ""; } catch (_error) { return ""; }
+}
+
+function preferredPhone() {
+  return phoneFromQuery() || storedPhone();
+}
+
 function IconButton({ label, children, className = "", ...props }) {
   return <button className={`icon-button ${className}`.trim()} aria-label={label} title={label} {...props}>{children}</button>;
 }
@@ -215,13 +225,13 @@ function App() {
   const [slots, setSlots] = useState([]);
   const [slotsState, setSlotsState] = useState("loading");
   const [slotsError, setSlotsError] = useState("");
-  const [form, setForm] = useState(() => ({ name: "", email: "", phone: storedPhone(), grade: "", comment: "" }));
+  const [form, setForm] = useState(() => ({ name: "", email: "", phone: preferredPhone(), grade: "", comment: "" }));
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(null);
   const [reschedule, setReschedule] = useState(null);
   const [confirmReschedule, setConfirmReschedule] = useState(false);
-  const [lookupPhone, setLookupPhone] = useState(storedPhone);
+  const [lookupPhone, setLookupPhone] = useState(preferredPhone);
   const [lookupState, setLookupState] = useState("idle");
   const [lookupError, setLookupError] = useState("");
   const [myBookings, setMyBookings] = useState([]);

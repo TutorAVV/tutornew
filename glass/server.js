@@ -1705,21 +1705,24 @@ app.post("/api/test/retry", async (req, res) => {
 });
 
 // ---------- static React shell + legacy-compatible page assets ----------
-// Vite copies glass/public/* into dist during build. The React landing page
-// lives in dist/index.html, while the fully functional cabinet, admin,
-// Telegram WebApp, and test page retain their explicit URLs.
+// Vite copies glass/public/* into dist during build. The landing page and the
+// student cabinet share the React shell; the remaining established pages keep
+// their explicit legacy-compatible assets and URLs.
 const DIST_DIR = path.join(__dirname, "dist");
+const REACT_SHELL = path.join(DIST_DIR, "index.html");
 app.get("/healthz", (req, res) => res.json({ ok: true, service: "tutor-booking-glass", time: new Date().toISOString() }));
+// These must precede express.static: `/cabinet.html` is an intentional React
+// route, not a stale static page with an .html extension.
+app.get(["/cabinet", "/cabinet.html"], (req, res) => res.sendFile(REACT_SHELL));
 app.use(express.static(DIST_DIR, { extensions: ["html"] }));
 app.get("/admin", (req, res) => res.sendFile(path.join(DIST_DIR, "admin.html")));
-app.get("/cabinet", (req, res) => res.sendFile(path.join(DIST_DIR, "cabinet.html")));
 app.get("/telegram", (req, res) => res.sendFile(path.join(DIST_DIR, "telegram.html")));
 app.get("/test", (req, res) => res.sendFile(path.join(DIST_DIR, "test.html")));
 // Keep client-side React routes future-proof. API routes are all registered
 // above, so an unknown non-API GET may safely render the landing shell.
 app.use((req, res) => {
   if (req.method !== "GET" && req.method !== "HEAD") return res.status(404).json({ ok: false, error: "not found" });
-  res.sendFile(path.join(DIST_DIR, "index.html"));
+  res.sendFile(REACT_SHELL);
 });
 
 app.listen(PORT, HOST, () => {
