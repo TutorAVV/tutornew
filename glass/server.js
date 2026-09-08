@@ -175,10 +175,21 @@ function homeworkStatus(value) {
   const status = String(value || "assigned");
   return HOMEWORK_STATUSES.has(status) ? status : "assigned";
 }
+// Older releases implemented deletion as a hidden record. New records carry an
+// explicit marker, so temporary hiding and deleting can coexist without making
+// a previously deleted task reappear in the teacher's list.
+function homeworkDeleted(row) {
+  if (Object.prototype.hasOwnProperty.call(row || {}, "deleted"))
+    return ["1", "true"].includes(String(row.deleted).toLowerCase());
+  return String(row?.visible == null ? "" : row.visible) === "0";
+}
 function homeworkView(row) {
   return {
     id: String(row.id || ""),
     phone: String(row.phone || ""),
+    // `visible` is an admin-only control. Student responses are filtered before
+    // mapping, while the teacher still receives hidden assignments for editing.
+    visible: flagOn(row.visible),
     studentName: esc(row.studentName || row.name, 160),
     title: esc(row.title || "Домашнее задание", 220),
     text: esc(row.text, 6000),
@@ -195,7 +206,7 @@ function homeworkView(row) {
   };
 }
 function buildStudentHomework(phone, rows) {
-  return rows.filter((row) => samePhone(row.phone, phone) && flagOn(row.visible))
+  return rows.filter((row) => samePhone(row.phone, phone) && !homeworkDeleted(row) && flagOn(row.visible))
     .map(homeworkView)
     .sort((a, b) => {
       const aDate = a.dueDate || "9999-12-31";
@@ -848,7 +859,7 @@ app.post("/api/cabinet/homework/:id/open", async (req, res) => {
     const cfg = await publicConfig();
     if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
     const rows = await tbl.list("Homework");
-    const row = rows.find((item) => String(item.id) === id && samePhone(item.phone, phone) && flagOn(item.visible));
+    const row = rows.find((item) => String(item.id) === id && samePhone(item.phone, phone) && !homeworkDeleted(item) && flagOn(item.visible));
     if (!row) return res.status(404).json({ ok: false, error: "Задание не найдено" });
     const currentStatus = homeworkStatus(row.status);
     const patch = currentStatus === "assigned" ? { status: "read", openedAt: row.openedAt || new Date().toISOString(), updatedAt: new Date().toISOString() } : {};
@@ -868,7 +879,7 @@ app.post("/api/cabinet/homework/:id/status", async (req, res) => {
     const cfg = await publicConfig();
     if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
     const rows = await tbl.list("Homework");
-    const row = rows.find((item) => String(item.id) === id && samePhone(item.phone, phone) && flagOn(item.visible));
+    const row = rows.find((item) => String(item.id) === id && samePhone(item.phone, phone) && !homeworkDeleted(item) && flagOn(item.visible));
     if (!row) return res.status(404).json({ ok: false, error: "Задание не найдено" });
     const currentStatus = homeworkStatus(row.status);
     if (currentStatus === "accepted") return res.status(409).json({ ok: false, error: "Задание уже принято преподавателем" });
@@ -1350,13 +1361,16 @@ function homeworkTelegramCopy(req, item) {
 app.get("/api/admin/homework", needAdmin, async (_req, res) => {
   try {
     const rows = await tbl.list("Homework");
-    const homework = rows.filter((row) => flagOn(row.visible)).map(homeworkView)
+    // Hidden assignments remain visible to the teacher so that a typo can be
+    // corrected and the task can be published again without recreating it.
+    const homework = rows.filter((row) => !homeworkDeleted(row)).map(homeworkView)
       .sort((a, b) => String(b.assignedAt).localeCompare(String(a.assignedAt)));
     const totals = homework.reduce((result, item) => {
       result.all += 1;
       result[item.status] = (result[item.status] || 0) + 1;
+      if (!item.visible) result.hidden += 1;
       return result;
-    }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0 });
+    }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0, hidden: 0 });
     res.json({ ok: true, homework, totals });
   } catch (error) { console.error("homework list:", error); res.status(500).json({ ok: false, error: "Не удалось загрузить домашние задания" }); }
 });
@@ -1410,7 +1424,7 @@ app.post("/api/admin/homework", needAdmin, async (req, res) => {
     const assignedAt = new Date().toISOString();
     const row = {
       id: newId("H"), phone, studentName: esc(student.name, 160), title, text, link, dueDate,
-      attachments: JSON.stringify(attachments), status: "assigned", visible: "1", assignedAt,
+      attachments: JSON.stringify(attachments), status: "assigned", visible: "1", deleted: "0", assignedAt,
       openedAt: "", completedAt: "", returnedAt: "", acceptedAt: "", updatedAt: assignedAt,
     };
     await tbl.append("Homework", row);
@@ -1433,20 +1447,64 @@ app.post("/api/admin/homework", needAdmin, async (req, res) => {
 
 app.patch("/api/admin/homework/:id", needAdmin, async (req, res) => {
   const id = String(req.params.id || "");
-  const status = String((req.body || {}).status || "");
-  if (!HOMEWORK_STATUSES.has(status)) return res.status(400).json({ ok: false, error: "Недопустимый статус задания" });
+  const body = req.body || {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(body, key);
+  if (!id) return res.status(400).json({ ok: false, error: "Задание не найдено" });
   try {
     const rows = await tbl.list("Homework");
-    const row = rows.find((item) => String(item.id) === id && flagOn(item.visible));
-    if (!row) return res.status(404).json({ ok: false, error: "Задание не найдено" });
-    const now = new Date().toISOString();
-    const patch = { status, updatedAt: now };
-    if (status === "revision") { patch.returnedAt = now; patch.completedAt = ""; }
-    if (status === "accepted") patch.acceptedAt = now;
-    if (status === "assigned") { patch.openedAt = ""; patch.completedAt = ""; patch.returnedAt = ""; patch.acceptedAt = ""; }
+    const row = rows.find((item) => String(item.id) === id);
+    if (!row || homeworkDeleted(row)) return res.status(404).json({ ok: false, error: "Задание не найдено" });
+    const patch = {};
+
+    if (has("title")) {
+      const title = esc(body.title, 220).trim();
+      if (!title) return res.status(400).json({ ok: false, error: "Добавьте название задания" });
+      patch.title = title;
+    }
+    if (has("text")) patch.text = esc(body.text, 6000).trim();
+    if (has("link")) {
+      const sourceLink = esc(body.link, 1600).trim();
+      const link = safeExternalUrl(sourceLink);
+      if (sourceLink && !link) return res.status(400).json({ ok: false, error: "Укажите корректную ссылку, начинающуюся с https://" });
+      patch.link = link;
+    }
+    if (has("dueDate")) {
+      const dueDate = String(body.dueDate || "");
+      if (dueDate && !isDateStr(dueDate)) return res.status(400).json({ ok: false, error: "Укажите корректный срок" });
+      patch.dueDate = dueDate;
+    }
+    if (has("attachments")) patch.attachments = JSON.stringify(parseHomeworkAttachments(body.attachments));
+    if (has("visible")) {
+      const value = body.visible;
+      patch.visible = value === false || ["0", "false", "off"].includes(String(value).toLowerCase()) ? "0" : "1";
+      // Add the explicit migration marker when a pre-visibility-control task
+      // is first hidden. Otherwise old soft-deleted rows and a new temporary
+      // hide would be indistinguishable.
+      patch.deleted = "0";
+    }
+
+    if (has("status")) {
+      const status = String(body.status || "");
+      if (!HOMEWORK_STATUSES.has(status)) return res.status(400).json({ ok: false, error: "Недопустимый статус задания" });
+      patch.status = status;
+      if (status === "revision") { patch.returnedAt = new Date().toISOString(); patch.completedAt = ""; }
+      if (status === "accepted") patch.acceptedAt = new Date().toISOString();
+      if (status === "assigned") { patch.openedAt = ""; patch.completedAt = ""; patch.returnedAt = ""; patch.acceptedAt = ""; }
+    }
+
+    // Status/visibility updates deliberately remain sparse and must keep working
+    // for any older record. Full content validation only applies when a teacher
+    // actually edits an assignment field.
+    if (has("title") || has("text") || has("link") || has("attachments")) {
+      const candidate = homeworkView({ ...row, ...patch });
+      if (!candidate.title) return res.status(400).json({ ok: false, error: "Добавьте название задания" });
+      if (!candidate.text && !candidate.link && !candidate.attachments.length)
+        return res.status(400).json({ ok: false, error: "Добавьте инструкцию, ссылку или вложение" });
+    }
+    patch.updatedAt = new Date().toISOString();
     await tbl.update("Homework", "id", id, patch);
     res.json({ ok: true, homework: homeworkView({ ...row, ...patch }) });
-  } catch (error) { console.error("homework update:", error); res.status(500).json({ ok: false, error: "Не удалось обновить статус" }); }
+  } catch (error) { console.error("homework update:", error); res.status(500).json({ ok: false, error: "Не удалось обновить задание" }); }
 });
 
 app.delete("/api/admin/homework/:id", needAdmin, async (req, res) => {
@@ -1454,8 +1512,9 @@ app.delete("/api/admin/homework/:id", needAdmin, async (req, res) => {
   if (!id) return res.status(400).json({ ok: false, error: "Не выбрано задание" });
   try {
     // Keep Drive/local files intact: a resource may be shared in another task,
-    // while deleting the assignment must immediately hide it from the learner.
-    await tbl.update("Homework", "id", id, { visible: "0", updatedAt: new Date().toISOString() });
+    // while deleting the assignment immediately removes it from every list.
+    // `deleted` distinguishes this from a teacher's reversible hidden state.
+    await tbl.update("Homework", "id", id, { visible: "0", deleted: "1", updatedAt: new Date().toISOString() });
     res.json({ ok: true });
   } catch (error) { console.error("homework delete:", error); res.status(500).json({ ok: false, error: "Не удалось удалить задание" }); }
 });

@@ -127,6 +127,11 @@ function formatDateTime(value) {
   return date.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+function phoneIdentity(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : String(value || "");
+}
+
 function dayTitle(iso) {
   const value = toIso(iso);
   if (!value) return String(iso || "");
@@ -658,7 +663,7 @@ export default function AdminApp() {
     if (view === "slots") return <SlotsView {...common} onScheduleChanged={() => loadSchedule().catch(() => {})} />;
     if (view === "students") return <StudentsView {...common} students={students} state={studentsState} onReload={refreshStudents} />;
     if (view === "tests") return <TestsView {...common} students={students} ensureStudents={ensureStudents} />;
-    if (view === "homework") return <HomeworkView {...common} students={students} ensureStudents={ensureStudents} />;
+    if (view === "homework") return <HomeworkView {...common} students={students} ensureStudents={ensureStudents} reloadStudents={refreshStudents} />;
     if (view === "tg") return <TelegramView {...common} />;
     if (view === "settings") return <SettingsView {...common} onSaved={(settings) => setConfig((current) => ({ ...current, ...settings }))} />;
     if (view === "help") return <HelpView />;
@@ -1043,11 +1048,17 @@ function TopicsPickerModal({ catalog, source, selection, loading, onClose, onTog
   return <Modal title="Выберите пройденные темы" onClose={onClose} wide className="adm-topics-modal"><p className="adm-modal-lead">{source === "table" ? "Каталог загружен из таблицы. Отметьте темы, которые уже прошли с учеником." : "Школьный каталог по предметам и классам. Отметьте только актуальные темы."}</p>{loading && <LoadingPanel label="Загружаем каталог тем" />}{!loading && !Object.keys(catalog).length && <InlineError>Каталог недоступен. Темы можно вписать вручную в карточке.</InlineError>}{!loading && Object.entries(catalog).map(([subject, grades]) => <section className="adm-topic-subject" key={subject}><h3>{subject}</h3><div>{Object.entries(grades || {}).map(([grade, topics]) => <article key={grade}><b>{grade}</b>{(topics || []).map((topic) => <label key={topic}><input type="checkbox" checked={Boolean(selection?.[subject]?.[grade]?.[topic])} onChange={() => onToggle(subject, grade, topic)} />{topic}</label>)}</article>)}</div></section>)}<div className="adm-modal-actions"><button className="button button-quiet" type="button" onClick={onClose}>Отмена</button><button className="button button-primary" type="button" disabled={loading || !Object.keys(catalog).length} onClick={onSave}><Check size={16} />Подставить темы</button></div></Modal>;
 }
 
-function HomeworkView({ request, notify, ask, students, ensureStudents }) {
+function HomeworkView({ request, notify, ask, students, ensureStudents, reloadStudents }) {
   const [homework, setHomework] = useState([]);
   const [state, setState] = useState({ loading: true, error: "" });
+  const [roster, setRoster] = useState(() => students || []);
+  const [rosterState, setRosterState] = useState({ loading: !students?.length, error: "" });
+  const [query, setQuery] = useState("");
+  const [selectedPhone, setSelectedPhone] = useState("");
   const [filter, setFilter] = useState("all");
   const [composer, setComposer] = useState(null);
+  const rosterRequested = useRef(Boolean(students?.length));
+
   const loadHomework = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setState({ loading: true, error: "" });
     try {
@@ -1062,28 +1073,89 @@ function HomeworkView({ request, notify, ask, students, ensureStudents }) {
     }
   }, [request]);
 
+  const loadRoster = useCallback(async ({ force = false } = {}) => {
+    setRosterState({ loading: true, error: "" });
+    try {
+      const list = force && reloadStudents ? await reloadStudents({ silent: true }) : await ensureStudents();
+      setRoster(Array.isArray(list) ? list : []);
+      setRosterState({ loading: false, error: "" });
+      return list;
+    } catch (error) {
+      setRosterState({ loading: false, error: safeError(error) });
+      throw error;
+    }
+  }, [ensureStudents, reloadStudents]);
+
   useEffect(() => { loadHomework().catch(() => {}); }, [loadHomework]);
+  useEffect(() => {
+    if (students?.length) {
+      rosterRequested.current = true;
+      setRoster(students);
+      setRosterState({ loading: false, error: "" });
+      return;
+    }
+    // An empty account is a valid result. Avoid repeatedly requesting the same
+    // empty roster while still fetching once whenever this view first opens.
+    if (rosterRequested.current) return;
+    rosterRequested.current = true;
+    loadRoster().catch(() => {});
+  }, [students, loadRoster]);
 
   const totals = useMemo(() => homework.reduce((result, item) => {
     result.all += 1;
     result[item.status] = (result[item.status] || 0) + 1;
+    if (!item.visible) result.hidden += 1;
     return result;
-  }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0 }), [homework]);
-  const shown = useMemo(() => homework.filter((item) => filter === "all" || item.status === filter), [filter, homework]);
+  }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0, hidden: 0 }), [homework]);
+
+  const countsByPhone = useMemo(() => homework.reduce((result, item) => {
+    const key = phoneIdentity(item.phone);
+    result[key] = (result[key] || 0) + 1;
+    return result;
+  }, {}), [homework]);
+  const queryText = query.trim().toLowerCase();
+  const visibleRoster = useMemo(() => roster.filter((student) => {
+    if (!queryText) return true;
+    return [student.name, student.phone, student.grade, student.subject].some((value) => String(value || "").toLowerCase().includes(queryText));
+  }), [roster, queryText]);
+  const selected = useMemo(() => roster.find((student) => phoneIdentity(student.phone) === phoneIdentity(selectedPhone)) || null, [roster, selectedPhone]);
+  const studentHomework = useMemo(() => homework.filter((item) => phoneIdentity(item.phone) === phoneIdentity(selectedPhone))
+    .filter((item) => filter === "all" || item.status === filter)
+    .sort((a, b) => String(b.assignedAt).localeCompare(String(a.assignedAt))), [filter, homework, selectedPhone]);
+  const selectedAllHomework = useMemo(() => homework.filter((item) => phoneIdentity(item.phone) === phoneIdentity(selectedPhone)), [homework, selectedPhone]);
+  const selectedTotals = useMemo(() => selectedAllHomework.reduce((result, item) => {
+    result.all += 1;
+    result[item.status] = (result[item.status] || 0) + 1;
+    return result;
+  }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0 }), [selectedAllHomework]);
+
+  useEffect(() => {
+    if (selectedPhone && roster.some((student) => phoneIdentity(student.phone) === phoneIdentity(selectedPhone))) return;
+    const firstStudentWithHomework = roster.find((student) => homework.some((item) => phoneIdentity(item.phone) === phoneIdentity(student.phone)));
+    setSelectedPhone(firstStudentWithHomework?.phone || roster[0]?.phone || "");
+  }, [homework, roster, selectedPhone]);
+
   const assign = async () => {
+    let list = roster;
     try {
-      const roster = await ensureStudents();
-      if (!roster?.length) { notify("Сначала добавьте ученика через запись на занятие или карточку ученика.", "error"); return; }
-      setComposer({ students: roster });
+      if (!list.length) list = await loadRoster();
+      if (!list?.length) { notify("Сначала добавьте ученика через запись на занятие или карточку ученика.", "error"); return; }
+      setComposer({ students: list, target: selectedPhone || list[0]?.phone || "" });
     } catch (error) { notify(safeError(error), "error"); }
   };
-  const setStatus = async (item, status) => {
+  const patchHomework = async (item, patch, message) => {
     try {
-      const data = await request(`/api/admin/homework/${encodeURIComponent(item.id)}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      const data = await request(`/api/admin/homework/${encodeURIComponent(item.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
       setHomework((current) => current.map((entry) => entry.id === item.id ? data.homework : entry));
-      notify(status === "accepted" ? "Задание отмечено как принятое." : status === "revision" ? "Задание возвращено на доработку." : "Статус задания обновлён.");
-    } catch (error) { notify(safeError(error), "error"); }
+      if (message) notify(message);
+      return data.homework;
+    } catch (error) {
+      notify(safeError(error), "error");
+      throw error;
+    }
   };
+  const setStatus = (item, status) => patchHomework(item, { status }, status === "accepted" ? "Задание отмечено как принятое." : status === "revision" ? "Задание возвращено на доработку." : "Статус задания обновлён.").catch(() => {});
+  const toggleVisible = (item) => patchHomework(item, { visible: !item.visible }, item.visible ? "Задание скрыто из кабинета ученика." : "Задание снова видно ученику.").catch(() => {});
   const remove = (item) => ask({
     title: "Удалить домашнее задание?",
     description: `Задание «${item.title}» сразу исчезнет из кабинета ${item.studentName || "ученика"}. Вложенные файлы останутся в хранилище, чтобы не удалить общий материал случайно.`,
@@ -1095,49 +1167,82 @@ function HomeworkView({ request, notify, ask, students, ensureStudents }) {
       notify("Домашнее задание удалено.");
     },
   });
+  const saveComposer = (item, delivery, editing) => {
+    setHomework((current) => editing ? current.map((entry) => entry.id === item.id ? item : entry) : [item, ...current]);
+    if (!editing) setSelectedPhone(item.phone);
+    setComposer(null);
+    if (editing) notify(item.visible ? "Изменения сохранены. Задание доступно ученику." : "Изменения сохранены. Задание пока скрыто от ученика.");
+    else {
+      const deliveryText = delivery === "sent" ? " Ещё и отправлено в Telegram." : delivery === "no-chat" ? " Telegram пока не привязан." : "";
+      notify(`Задание выдано и появилось в кабинете ученика.${deliveryText}`);
+    }
+  };
+  const filterOptions = [["all", "Все", selectedTotals.all], ["assigned", "Не открыто", selectedTotals.assigned], ["completed", "Выполнено", selectedTotals.completed], ["accepted", "Принято", selectedTotals.accepted]];
+  const selectedHidden = selectedAllHomework.filter((item) => !item.visible).length;
 
   return <section className="adm-page">
-    <PageHeader eyebrow="Индивидуальные задания" title="Домашнее" accent="и прогресс." description="Выдавайте задание одному ученику, прикладывайте материалы и сразу видьте, прочитал ли он его и отметил ли выполнение." actions={<><button className="button button-quiet" type="button" onClick={() => loadHomework().catch(() => {})} disabled={state.loading}>{state.loading ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}Обновить</button><button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button></>} />
-    <section className="adm-metric-grid adm-homework-metrics">
-      <Metric icon={<ListTodo size={19} />} label="Всего заданий" value={totals.all} hint="Видны преподавателю" />
-      <Metric icon={<Sparkles size={19} />} label="Не открыто" value={totals.assigned} hint="Ждут ученика" tone="orange" />
-      <Metric icon={<Clock3 size={19} />} label="В работе" value={(totals.read || 0) + (totals.revision || 0)} hint="Прочитано или дорабатывается" tone="violet" />
-      <Metric icon={<CheckCircle2 size={19} />} label="Готово" value={(totals.completed || 0) + (totals.accepted || 0)} hint="Отмечено учеником" tone="mint" />
-    </section>
-    <section className="adm-homework-toolbar glass"><div><b>Статус</b><span>Показывайте только нужные задания</span></div><div className="adm-homework-filters">{[["all", "Все"], ["assigned", "Не открыто"], ["read", "В работе"], ["completed", "Выполнено"], ["revision", "Доработка"], ["accepted", "Принято"]].map(([value, label]) => <button type="button" key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}<b>{totals[value] || 0}</b></button>)}</div></section>
-    {state.loading && !homework.length && <LoadingPanel label="Загружаем домашние задания" />}
-    {state.error && !homework.length && <InlineError onRetry={() => loadHomework().catch(() => {})}>{state.error}</InlineError>}
-    {!state.loading && !state.error && !homework.length && <EmptyState icon={<ListTodo size={30} />} title="Домашних заданий пока нет" text="Выдайте первое индивидуальное задание — ученик увидит его в новом разделе «Домашнее» своего кабинета." action={<button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button>} />}
-    {!state.loading && Boolean(homework.length) && !shown.length && <EmptyState icon={<ListTodo size={28} />} title="В этом статусе пока пусто" text="Выберите другой фильтр, чтобы увидеть остальные задания." />}
-    {!state.loading && Boolean(shown.length) && <div className="adm-homework-list">{shown.map((item) => <AdminHomeworkCard key={item.id} item={item} onStatus={setStatus} onDelete={remove} />)}</div>}
-    {composer && <HomeworkComposerModal students={composer.students} request={request} notify={notify} onClose={() => setComposer(null)} onSaved={(item, delivery) => { setHomework((current) => [item, ...current]); setComposer(null); const deliveryText = delivery === "sent" ? " Ещё и отправлено в Telegram." : delivery === "no-chat" ? " Telegram пока не привязан." : ""; notify(`Задание выдано и появилось в кабинете ученика.${deliveryText}`); }} />}
+    <PageHeader eyebrow="Индивидуальные задания" title="Домашнее" accent="и прогресс." description="Выдавайте задание одному ученику, исправляйте его при необходимости и управляйте тем, что видно в кабинете." actions={<><button className="button button-quiet" type="button" onClick={() => Promise.all([loadHomework(), loadRoster({ force: true })]).catch(() => {})} disabled={state.loading || rosterState.loading}>{state.loading || rosterState.loading ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}Обновить</button><button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button></>} />
+    <div className="adm-metrics adm-homework-metrics">{[[totals.all, "всего заданий", totals.hidden ? `скрыто: ${totals.hidden}` : "по всем ученикам"], [totals.assigned, "ещё не открыли", "ждут ученика"], [totals.completed, "ждут проверки", "отметили выполнение"], [totals.accepted, "принято", "завершённые задания"]].map(([value, label, hint]) => <div className="glass" key={label}><b>{value}</b><span>{label}</span><small>{hint}</small></div>)}</div>
+    <div className="adm-homework-layout adm-students-layout">
+      <aside className="adm-homework-student-list adm-student-list glass">
+        <div className="adm-homework-student-list-head adm-student-list-head"><div><b>Ученики</b><span>{roster.length} всего</span></div><label className="adm-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти ученика" /></label></div>
+        {rosterState.loading && !roster.length && <LoadingPanel label="Загружаем учеников" />}
+        {rosterState.error && !roster.length && <InlineError onRetry={() => loadRoster().catch(() => {})}>{rosterState.error}</InlineError>}
+        {!rosterState.loading && !rosterState.error && !roster.length && <p className="adm-small-empty">Ученики появятся после первой записи на урок.</p>}
+        {roster.length > 0 && <div className="adm-homework-student-scroll adm-student-scroll">{visibleRoster.map((student) => {
+          const count = countsByPhone[phoneIdentity(student.phone)] || 0;
+          return <button type="button" key={student.phone} className={phoneIdentity(selected?.phone) === phoneIdentity(student.phone) ? "active" : ""} onClick={() => setSelectedPhone(student.phone)}><span>{String(student.name || "У").trim().charAt(0).toUpperCase()}</span><div><b>{student.name || "Без имени"}{student.chat_id && <em title="Telegram привязан">✈</em>}</b><small>{student.phone}{student.grade ? ` · ${student.grade}` : ""}</small><i>{count ? `${count} ${count === 1 ? "задание" : count < 5 ? "задания" : "заданий"}` : "нет заданий"}</i></div></button>;
+        })}{!visibleRoster.length && <p className="adm-small-empty">Поиск ничего не нашёл.</p>}</div>}
+      </aside>
+      <main className="adm-homework-detail">
+        {!rosterState.loading && !roster.length && <EmptyState icon={<UsersRound size={29} />} title="Некому выдать задание" text="Сначала добавьте ученика через запись на урок или его карточку." />}
+        {selected && <>
+          <section className="adm-homework-student-hero glass"><div className="adm-avatar">{String(selected.name || "У").trim().charAt(0).toUpperCase()}</div><div><span className="eyebrow">Задания ученика</span><h2>{selected.name || "Без имени"}</h2><p>{selected.phone}{selected.grade ? ` · ${selected.grade}` : ""}{selected.subject ? ` · ${selected.subject}` : ""}</p></div><button type="button" className="button button-quiet" onClick={assign}><Plus size={15} />Новое</button></section>
+          <div className="adm-homework-toolbar glass"><div><b>{selectedAllHomework.length ? `${selectedAllHomework.length} ${selectedAllHomework.length === 1 ? "задание" : selectedAllHomework.length < 5 ? "задания" : "заданий"}` : "Заданий пока нет"}</b><span>{selectedHidden ? `Скрыто от ученика: ${selectedHidden}` : "Новые задания показываются сверху"}</span></div><div className="adm-homework-filters">{filterOptions.map(([key, label, count]) => <button type="button" key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}<b>{count}</b></button>)}</div></div>
+          {state.loading && !homework.length && <LoadingPanel label="Загружаем домашние задания" />}
+          {state.error && !homework.length && <InlineError onRetry={() => loadHomework().catch(() => {})}>{state.error}</InlineError>}
+          {!state.loading && !state.error && !selectedAllHomework.length && <EmptyState icon={<ListTodo size={29} />} title="Для этого ученика заданий пока нет" text="Выдайте первое индивидуальное задание — оно сразу появится в кабинете ученика." action={<button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button>} />}
+          {!state.loading && !state.error && Boolean(selectedAllHomework.length) && !studentHomework.length && <EmptyState icon={<CircleAlert size={28} />} title="В этом статусе пока пусто" text="Выберите другой фильтр, чтобы увидеть остальные задания ученика." />}
+          {!state.loading && Boolean(studentHomework.length) && <div className="adm-homework-list">{studentHomework.map((item, index) => <AdminHomeworkCard key={item.id} item={item} initiallyExpanded={index === 0} onStatus={setStatus} onEdit={() => setComposer({ students: roster, item })} onToggleVisible={toggleVisible} onDelete={remove} />)}</div>}
+        </>}
+      </main>
+    </div>
+    {composer && <HomeworkComposerModal students={composer.students} initial={composer.item || null} initialTarget={composer.target || composer.item?.phone || ""} request={request} notify={notify} onClose={() => setComposer(null)} onSaved={saveComposer} />}
   </section>;
 }
 
-function AdminHomeworkCard({ item, onStatus, onDelete }) {
+function AdminHomeworkCard({ item, initiallyExpanded, onStatus, onEdit, onToggleVisible, onDelete }) {
+  const [expanded, setExpanded] = useState(initiallyExpanded);
   const status = HOMEWORK_STATUS[item.status] || HOMEWORK_STATUS.assigned;
   const StatusIcon = status.Icon;
   const progress = item.status === "assigned" ? "Ученик ещё не открывал задание" : item.status === "read" ? `Прочитано ${formatDateTime(item.openedAt)}` : item.status === "completed" ? `Выполнено ${formatDateTime(item.completedAt)}` : item.status === "revision" ? `Возвращено на доработку ${formatDateTime(item.returnedAt)}` : `Принято ${formatDateTime(item.acceptedAt)}`;
-  return <article className={`adm-homework-card glass ${item.status}`}>
-    <header><div className="adm-homework-card-title"><span className="adm-homework-card-icon"><ListTodo size={19} /></span><div><small>{item.dueDate ? `Срок: ${formatDate(item.dueDate, { day: "numeric", month: "long", year: "numeric" })}` : "Без срока"}</small><h2>{item.title}</h2></div></div><span className={`adm-homework-status ${status.tone}`}><StatusIcon size={14} />{status.label}</span></header>
-    <div className="adm-homework-card-grid"><div><span className="adm-homework-label">Ученик</span><b>{item.studentName || "Без имени"}</b><small>{item.phone}</small></div><div><span className="adm-homework-label">Прогресс</span><b>{progress}</b><small>{item.assignedAt ? `Выдано ${formatDateTime(item.assignedAt)}` : ""}</small></div></div>
-    {item.text && <p className="adm-homework-copy">{item.text}</p>}
-    {(item.link || item.attachments?.length) && <div className="adm-homework-resources"><span>Материалы</span>{item.link && <a href={item.link} target="_blank" rel="noreferrer"><Link2 size={14} />Ссылка <ExternalLink size={12} /></a>}{item.attachments?.map((attachment) => <a href={attachment.url} target="_blank" rel="noreferrer" key={attachment.id || attachment.url}><FileText size={14} />{attachment.name} {attachment.size ? `· ${formatFileSize(attachment.size)}` : ""}<ExternalLink size={12} /></a>)}</div>}
-    <footer><div className="adm-homework-card-actions">{item.status === "completed" && <><button className="button button-primary" type="button" onClick={() => onStatus(item, "accepted")}><Check size={15} />Принять</button><button className="button button-quiet" type="button" onClick={() => onStatus(item, "revision")}><RotateCcw size={15} />На доработку</button></>}{item.status === "revision" && <button className="button button-primary" type="button" onClick={() => onStatus(item, "accepted")}><Check size={15} />Принять</button>}{item.status === "accepted" && <button className="button button-quiet" type="button" onClick={() => onStatus(item, "assigned")}><RotateCcw size={15} />Сбросить статус</button>}</div><IconButton label="Удалить домашнее задание" className="danger" onClick={() => onDelete(item)}><Trash2 size={16} /></IconButton></footer>
+  return <article className={`adm-homework-card glass ${item.status} ${expanded ? "expanded" : ""} ${item.visible ? "" : "hidden"}`}>
+    <button className="adm-homework-card-head" type="button" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>
+      <div className="adm-homework-card-title"><span className="adm-homework-card-icon"><ListTodo size={19} /></span><div><small>{item.dueDate ? `Срок: ${formatDate(item.dueDate, { day: "numeric", month: "long", year: "numeric" })}` : "Без срока"}</small><h2>{item.title}</h2></div></div>
+      <div className="adm-homework-head-meta">{!item.visible && <span className="adm-homework-hidden">Скрыто</span>}<span className={`adm-homework-status ${status.tone}`}><StatusIcon size={14} />{status.label}</span></div><ChevronRight className="adm-homework-chevron" size={18} />
+    </button>
+    {expanded && <div className="adm-homework-detail-body">
+      <div className="adm-homework-card-grid"><div><span className="adm-homework-label">Ученик</span><b>{item.studentName || "Без имени"}</b><small>{item.phone}</small></div><div><span className="adm-homework-label">Прогресс</span><b>{progress}</b><small>{item.assignedAt ? `Выдано ${formatDateTime(item.assignedAt)}` : ""}</small></div></div>
+      {item.text && <p className="adm-homework-copy">{item.text}</p>}
+      {(item.link || item.attachments?.length) && <div className="adm-homework-resources"><span>Материалы</span>{item.link && <a href={item.link} target="_blank" rel="noreferrer"><Link2 size={14} />Ссылка <ExternalLink size={12} /></a>}{item.attachments?.map((attachment) => <a href={attachment.url} target="_blank" rel="noreferrer" key={attachment.id || attachment.url}><FileText size={14} />{attachment.name} {attachment.size ? `· ${formatFileSize(attachment.size)}` : ""}<ExternalLink size={12} /></a>)}</div>}
+      <footer><div className="adm-homework-card-actions"><button className="button button-quiet" type="button" onClick={() => onEdit(item)}><Pencil size={15} />Изменить</button><button className="button button-quiet" type="button" onClick={() => onToggleVisible(item)}>{item.visible ? "Скрыть от ученика" : "Показать ученику"}</button>{item.status === "completed" && <><button className="button button-primary" type="button" onClick={() => onStatus(item, "accepted")}><Check size={15} />Принять</button><button className="button button-quiet" type="button" onClick={() => onStatus(item, "revision")}><RotateCcw size={15} />На доработку</button></>}{item.status === "revision" && <button className="button button-primary" type="button" onClick={() => onStatus(item, "accepted")}><Check size={15} />Принять</button>}{item.status === "accepted" && <button className="button button-quiet" type="button" onClick={() => onStatus(item, "assigned")}><RotateCcw size={15} />Сбросить статус</button>}</div><IconButton label="Удалить домашнее задание" className="danger" onClick={() => onDelete(item)}><Trash2 size={16} /></IconButton></footer>
+    </div>}
   </article>;
 }
 
-function HomeworkComposerModal({ students, request, notify, onClose, onSaved }) {
-  const [target, setTarget] = useState(() => students[0]?.phone || "");
-  const [draft, setDraft] = useState({ title: "", text: "", link: "", dueDate: "" });
-  const [attachments, setAttachments] = useState([]);
-  const [sendTg, setSendTg] = useState(Boolean(students[0]?.chat_id));
+function HomeworkComposerModal({ students, initial, initialTarget, request, notify, onClose, onSaved }) {
+  const editing = Boolean(initial?.id);
+  const [target, setTarget] = useState(() => initial?.phone || initialTarget || students[0]?.phone || "");
+  const [draft, setDraft] = useState(() => ({ title: initial?.title || "", text: initial?.text || "", link: initial?.link || "", dueDate: initial?.dueDate || "" }));
+  const [attachments, setAttachments] = useState(() => Array.isArray(initial?.attachments) ? initial.attachments : []);
+  const [visible, setVisible] = useState(() => initial?.visible !== false);
+  const [sendTg, setSendTg] = useState(() => !editing && Boolean(students.find((student) => student.phone === (initialTarget || students[0]?.phone))?.chat_id));
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const selected = students.find((student) => student.phone === target);
   useEffect(() => {
-    if (!students.some((student) => student.phone === target)) setTarget(students[0]?.phone || "");
-  }, [students, target]);
+    if (!editing && !students.some((student) => student.phone === target)) setTarget(students[0]?.phone || "");
+  }, [editing, students, target]);
   useEffect(() => { if (!selected?.chat_id) setSendTg(false); }, [selected?.chat_id]);
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
   const uploadFiles = async (event) => {
@@ -1162,12 +1267,15 @@ function HomeworkComposerModal({ students, request, notify, onClose, onSaved }) 
     if (!target) { notify("Выберите ученика.", "error"); return; }
     setSaving(true);
     try {
-      const response = await request("/api/admin/homework", { method: "POST", body: JSON.stringify({ phone: target, ...draft, attachments, sendTg }) });
-      onSaved(response.homework, response.tg);
+      const payload = { ...draft, attachments };
+      const response = editing
+        ? await request(`/api/admin/homework/${encodeURIComponent(initial.id)}`, { method: "PATCH", body: JSON.stringify({ ...payload, visible }) })
+        : await request("/api/admin/homework", { method: "POST", body: JSON.stringify({ phone: target, ...payload, sendTg }) });
+      onSaved(response.homework, response.tg, editing);
     } catch (error) { notify(safeError(error), "error"); }
     finally { setSaving(false); }
   };
-  return <Modal title="Выдать домашнее задание" onClose={saving || uploading ? undefined : onClose} wide className="adm-homework-modal"><form onSubmit={submit}><p className="adm-modal-lead">Задание увидит только выбранный ученик. После открытия и отметки о выполнении его статус сразу отразится в этом списке.</p><div className="adm-form-grid two"><label><span className="field-label">Ученик</span><select value={target} onChange={(event) => setTarget(event.target.value)} required><option value="">Выберите ученика</option>{students.map((student) => <option key={student.phone} value={student.phone}>{student.name || "Без имени"} · {student.phone}{student.grade ? ` · ${student.grade}` : ""}</option>)}</select></label><label><span className="field-label">Срок <small>необязательно</small></span><input type="date" value={draft.dueDate} onChange={(event) => update("dueDate", event.target.value)} /></label></div><label><span className="field-label">Название задания</span><input value={draft.title} onChange={(event) => update("title", event.target.value)} placeholder="Например, Дроби: задачи 12–18" maxLength="220" required autoFocus /></label><label><span className="field-label">Инструкция</span><textarea rows="6" value={draft.text} onChange={(event) => update("text", event.target.value)} placeholder="Что сделать, на что обратить внимание и как подготовиться к следующему уроку…" maxLength="6000" /></label><label><span className="field-label">Ссылка на материал <small>необязательно</small></span><input type="url" value={draft.link} onChange={(event) => update("link", event.target.value)} placeholder="https://drive.google.com/…" maxLength="1600" /></label><section className="adm-homework-attachments"><div><span className="field-label">Вложения <small>до 5 файлов, каждый до 6 МБ</small></span><label className={`adm-upload-control ${uploading ? "busy" : ""}`}><input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.zip" onChange={uploadFiles} disabled={uploading || saving || attachments.length >= 5} /><FileText size={17} /><span>{uploading ? "Загружаем файл…" : "Добавить файл"}</span></label></div>{attachments.length > 0 && <div className="adm-uploaded-files">{attachments.map((attachment) => <div key={attachment.id || attachment.url}><FileText size={15} /><span><b>{attachment.name}</b><small>{attachment.size ? formatFileSize(attachment.size) : "Файл прикреплён"}</small></span><button type="button" onClick={() => setAttachments((current) => current.filter((entry) => (entry.id || entry.url) !== (attachment.id || attachment.url)))} aria-label={`Убрать ${attachment.name}`} disabled={saving}>×</button></div>)}</div>}</section><div className="adm-destination-row"><label className={!selected?.chat_id ? "disabled" : ""}><input type="checkbox" checked={sendTg} disabled={!selected?.chat_id} onChange={(event) => setSendTg(event.target.checked)} />Продублировать ученику в Telegram{!selected?.chat_id && " · не привязан"}</label></div><div className="adm-modal-actions"><button className="button button-quiet" type="button" onClick={onClose} disabled={saving || uploading}>Отмена</button><button className="button button-primary" type="submit" disabled={saving || uploading}>{saving ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}Выдать задание</button></div></form></Modal>;
+  return <Modal title={editing ? "Изменить домашнее задание" : "Выдать домашнее задание"} onClose={saving || uploading ? undefined : onClose} wide className="adm-homework-modal"><form onSubmit={submit}><p className="adm-modal-lead">{editing ? "Исправьте содержание или материалы. Получатель и его прогресс сохранятся, а видимость можно переключить ниже." : "Задание увидит только выбранный ученик. После открытия и отметки о выполнении его статус сразу отразится в этом списке."}</p><div className="adm-form-grid two"><label><span className="field-label">Ученик</span><select value={target} onChange={(event) => setTarget(event.target.value)} required disabled={editing}><option value="">Выберите ученика</option>{students.map((student) => <option key={student.phone} value={student.phone}>{student.name || "Без имени"} · {student.phone}{student.grade ? ` · ${student.grade}` : ""}</option>)}</select>{editing && <small className="adm-field-hint">Получателя выданного задания менять нельзя.</small>}</label><label><span className="field-label">Срок <small>необязательно</small></span><input type="date" value={draft.dueDate} onChange={(event) => update("dueDate", event.target.value)} /></label></div><label><span className="field-label">Название задания</span><input value={draft.title} onChange={(event) => update("title", event.target.value)} placeholder="Например, Дроби: задачи 12–18" maxLength="220" required autoFocus /></label><label><span className="field-label">Инструкция</span><textarea rows="6" value={draft.text} onChange={(event) => update("text", event.target.value)} placeholder="Что сделать, на что обратить внимание и как подготовиться к следующему уроку…" maxLength="6000" /></label><label><span className="field-label">Ссылка на материал <small>необязательно</small></span><input type="url" value={draft.link} onChange={(event) => update("link", event.target.value)} placeholder="https://drive.google.com/…" maxLength="1600" /></label><section className="adm-homework-attachments"><div><span className="field-label">Вложения <small>до 5 файлов, каждый до 6 МБ</small></span><label className={`adm-upload-control ${uploading ? "busy" : ""}`}><input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.zip" onChange={uploadFiles} disabled={uploading || saving || attachments.length >= 5} /><FileText size={17} /><span>{uploading ? "Загружаем файл…" : "Добавить файл"}</span></label></div>{attachments.length > 0 && <div className="adm-uploaded-files">{attachments.map((attachment) => <div key={attachment.id || attachment.url}><FileText size={15} /><span><b>{attachment.name}</b><small>{attachment.size ? formatFileSize(attachment.size) : "Файл прикреплён"}</small></span><button type="button" onClick={() => setAttachments((current) => current.filter((entry) => (entry.id || entry.url) !== (attachment.id || attachment.url)))} aria-label={`Убрать ${attachment.name}`} disabled={saving}>×</button></div>)}</div>}</section>{editing ? <div className="adm-destination-row"><label><input type="checkbox" checked={visible} onChange={(event) => setVisible(event.target.checked)} />Показывать это задание в кабинете ученика</label></div> : <div className="adm-destination-row"><label className={!selected?.chat_id ? "disabled" : ""}><input type="checkbox" checked={sendTg} disabled={!selected?.chat_id} onChange={(event) => setSendTg(event.target.checked)} />Продублировать ученику в Telegram{!selected?.chat_id && " · не привязан"}</label></div>}<div className="adm-modal-actions"><button className="button button-quiet" type="button" onClick={onClose} disabled={saving || uploading}>Отмена</button><button className="button button-primary" type="submit" disabled={saving || uploading}>{saving ? <LoaderCircle className="spin" size={16} /> : editing ? <Save size={16} /> : <Send size={16} />}{editing ? "Сохранить изменения" : "Выдать задание"}</button></div></form></Modal>;
 }
 
 function TestsView({ request, notify, ask, students, ensureStudents }) {
