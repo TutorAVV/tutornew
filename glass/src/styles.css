@@ -1034,3 +1034,202 @@ h3 { font-size: 20px; }
 :root[data-theme="light"] .adm-toast.error { color: #92203b; background: rgba(255,240,244,.95); }
 .cab-next-footer .cab-next-unavailable { display: inline-flex; align-items: center; gap: 4px; color: var(--faint); font-size: 9px; font-weight: 750; }
 :root[data-theme="light"] .cab-next-footer .cab-next-unavailable { color: #6a6278; }
+
+/* --------------------------------------------------------------------------
+   Follow-up polish: make the public booking flow genuinely narrow-screen safe
+   -------------------------------------------------------------------------- */
+/* Do not create a 320px-wide layout viewport on small embedded WebViews. */
+body { min-width: 0; }
+.booking-layout,
+.booking-studio,
+.booking-aside,
+.booking-step,
+.details-form,
+.form-grid,
+.form-grid > *,
+.details-form label { min-width: 0; }
+
+/* Tablets and narrow browser windows use the same complete one-column booking
+   flow as a phone. This prevents the two-field contact grid and the old date
+   strip from disappearing behind the edge of the glass panel. */
+@media (max-width: 840px) {
+  .booking-section .container { width: min(100% - 28px, 840px); }
+  .booking-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; width: 100%; }
+  .booking-studio { width: 100%; max-width: 100%; padding: clamp(17px, 3.6vw, 25px); overflow: visible; }
+  .booking-aside { min-width: 0; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); gap: 11px; }
+  .details-form input,
+  .details-form select,
+  .comment-field { min-width: 0; max-width: 100%; }
+  .date-scroller { display: none; }
+  .mobile-date-picker { display: block; min-width: 0; max-width: 100%; }
+  .mobile-date-picker-head { display: grid; grid-template-columns: 35px minmax(0, 1fr) 35px; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .mobile-date-picker-head button { display: inline-flex; align-items: center; justify-content: center; width: 35px; height: 35px; color: var(--blue); cursor: pointer; border: 1px solid var(--line-strong); border-radius: 11px; background: rgba(255,255,255,.07); }
+  .mobile-date-picker-head button:disabled { cursor: not-allowed; opacity: .38; }
+  .mobile-date-picker-head span { overflow: hidden; color: var(--ink-soft); font-size: 11px; font-weight: 850; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-date-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; width: 100%; }
+  .mobile-date-grid button { display: flex; align-items: center; flex-direction: column; justify-content: center; min-width: 0; min-height: 68px; gap: 2px; padding: 5px 2px; color: var(--muted); cursor: pointer; border: 1px solid var(--line-strong); border-radius: 12px; background: rgba(255,255,255,.045); }
+  .mobile-date-grid button.selected { color: #fff; border-color: rgba(201,188,255,.52); background: linear-gradient(145deg, rgba(130,94,241,.82), rgba(82,139,209,.6)); box-shadow: 0 7px 15px rgba(70,54,189,.24); }
+  .mobile-date-grid small { overflow: hidden; max-width: 100%; font-size: 8px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-date-grid b { font-size: 20px; letter-spacing: -.06em; line-height: 1; }
+  .mobile-date-grid span { font-size: 8px; font-weight: 750; }
+  .subject-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .subject-button { grid-template-columns: 27px minmax(0, 1fr); min-width: 0; min-height: 60px; gap: 8px; padding: 8px 9px; font-size: 12px; line-height: 1.25; }
+  .subject-button > svg { display: none; }
+  .subject-symbol { width: 27px; height: 27px; border-radius: 9px; }
+  .slot-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .selection-summary b { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (max-width: 480px) {
+  .booking-section .container { width: min(100% - 20px, 480px); }
+  .booking-studio { padding: 15px; border-radius: 19px; }
+  .studio-topline { margin-bottom: 16px; }
+  .booking-step { margin-bottom: 21px; }
+  .mobile-date-grid { gap: 4px; }
+  .mobile-date-grid button { min-height: 64px; border-radius: 10px; }
+  .mobile-date-grid b { font-size: 19px; }
+  .subject-switch { gap: 6px; }
+  .subject-button { min-height: 58px; gap: 6px; padding: 7px; font-size: 10px; }
+  .subject-symbol { width: 25px; height: 25px; font-size: 15px; }
+  .slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slots-message { padding: 12px; }
+}
+
+/* --------------------------------------------------------------------------
+   Cabinet clarity
+   -------------------------------------------------------------------------- */
+.cab-profile-button { max-width: min(390px, 36vw); }
+.cabinet-header-actions { min-width: 0; }
+.cab-time-orb {
+  width: 82px;
+  height: 82px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 31% 20%, rgba(182,167,255,.54), rgba(73,145,223,.38) 51%, rgba(36,83,160,.17));
+}
+.cab-time-orb b { margin: 0; font-size: 18px; }
+.cab-time-orb small,
+.cab-time-orb span { display: none; }
+.cab-calendar-day { border-color: var(--line-strong); box-shadow: inset 0 1px rgba(255,255,255,.08); }
+.cab-calendar-day > span { gap: 4px; }
+.cab-calendar-day i { padding: 3px 5px; border-width: 1px; font-size: 8px; font-weight: 900; line-height: 1.18; }
+.cab-calendar-day i.pending { border-color: rgba(253,180,107,.34); background: rgba(240,157,66,.18); }
+.cab-calendar-day i.confirmed { border-color: rgba(88,202,251,.35); background: rgba(63,166,224,.19); }
+.cab-calendar-day i.done { border-color: rgba(80,234,179,.35); background: rgba(40,199,147,.18); }
+.cab-calendar-day i.cancelled { border-color: rgba(255,132,151,.35); background: rgba(229,81,111,.18); }
+@media (max-width: 720px) {
+  .cab-time-orb { width: 70px; height: 70px; }
+  .cab-calendar-day { border-color: rgba(149,177,224,.45); }
+  .cab-calendar-day > span::before { width: 6px; height: 6px; border: 1px solid rgba(255,255,255,.55); box-shadow: 0 0 9px var(--blue); }
+}
+
+/* A solid paper-like surface makes action dialogs feel intentional in light
+   mode instead of blending into a grey translucent backdrop. */
+:root[data-theme="light"] .adm-modal.glass,
+:root[data-theme="light"] .cab-reschedule-modal.glass {
+  background: #fff;
+  border-color: rgba(74, 108, 161, .34);
+  box-shadow: 0 28px 80px rgba(37, 61, 104, .23), inset 0 1px rgba(255,255,255,.96);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root[data-theme="light"] .adm-modal-head,
+:root[data-theme="light"] .cab-reschedule-modal-head { background: #fff; }
+:root[data-theme="light"] .adm-calendar-grid > button,
+:root[data-theme="light"] .adm-calendar-grid > .blank,
+:root[data-theme="light"] .adm-calendar-selection .adm-slot-card { border-color: rgba(80,113,165,.28); background: #f8fbff; }
+:root[data-theme="light"] .cab-reschedule-dates button:not(.selected),
+:root[data-theme="light"] .cab-reschedule-slots button:not(.selected) { border-color: rgba(80,113,165,.30); background: #f8fbff; }
+
+/* Native selects remain native (accessible and keyboard friendly) but receive
+   a consistent glass field, clear chevron and generous space for their value. */
+.adm-page select,
+.adm-modal select,
+.details-form select,
+.tgapp-form-grid select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 38px !important;
+  border-color: var(--line-strong) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2399abd0' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-position: right 11px center !important;
+  background-repeat: no-repeat !important;
+  background-size: 15px 15px !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.09), 0 1px 0 rgba(0,0,0,.04);
+}
+.adm-page select:hover,
+.adm-modal select:hover,
+.details-form select:hover,
+.tgapp-form-grid select:hover { border-color: rgba(104,196,249,.72) !important; }
+.adm-modal input:not([type="checkbox"]):not([type="radio"]),
+.adm-modal select,
+.adm-modal textarea {
+  width: 100%;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  outline: 0;
+  background-color: rgba(255,255,255,.07);
+  font-size: 12px;
+  font-weight: 650;
+}
+.adm-modal input:not([type="checkbox"]):not([type="radio"]),
+.adm-modal select { min-height: 42px; padding: 9px 11px; }
+.adm-modal textarea { display: block; padding: 10px 12px; line-height: 1.55; resize: vertical; }
+.adm-modal input:not([type="checkbox"]):not([type="radio"]):focus,
+.adm-modal select:focus,
+.adm-modal textarea:focus { border-color: rgba(112,195,255,.78); background-color: rgba(255,255,255,.12); box-shadow: 0 0 0 3px rgba(81,178,246,.13); }
+:root[data-theme="light"] .adm-page select,
+:root[data-theme="light"] .adm-modal select,
+:root[data-theme="light"] .details-form select,
+:root[data-theme="light"] .tgapp-form-grid select {
+  color-scheme: light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23445d80' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+}
+:root[data-theme="light"] .adm-modal input:not([type="checkbox"]):not([type="radio"]),
+:root[data-theme="light"] .adm-modal select,
+:root[data-theme="light"] .adm-modal textarea { background-color: #f8fbff; }
+.adm-page option,
+.adm-modal option { color: #172844; background: #fff; }
+.adm-inline-actions { margin: 12px 20px 0; padding: 10px 0 2px; border-top: 1px solid var(--line); }
+@media (max-width: 720px) { .adm-inline-actions { margin: 12px 15px 0; } }
+
+/* Status labels need contrast on their own tinted fills, especially in the
+   light palette. The same treatment covers the cabinet, admin schedule and
+   result views instead of only the two examples called out above. */
+.cab-status.done,
+.adm-status.open,
+.adm-status.done { color: #e6fff4; font-weight: 900; border-color: rgba(85,239,185,.40); background: rgba(30,159,111,.22); }
+:root[data-theme="light"] .cab-status.done,
+:root[data-theme="light"] .adm-status.open,
+:root[data-theme="light"] .adm-status.done { color: #075f46; border-color: rgba(12,133,94,.42); background: rgba(43,183,137,.14); }
+:root[data-theme="light"] .cab-status.pending,
+:root[data-theme="light"] .adm-status.pending { color: #774a00; border-color: rgba(180,111,17,.36); background: rgba(239,168,57,.16); }
+:root[data-theme="light"] .cab-status.confirmed,
+:root[data-theme="light"] .adm-status.booked,
+:root[data-theme="light"] .adm-status.confirmed { color: #0b5e91; border-color: rgba(26,123,181,.35); background: rgba(63,165,224,.13); }
+:root[data-theme="light"] .cab-status.cancelled,
+:root[data-theme="light"] .adm-status.closed,
+:root[data-theme="light"] .adm-status.cancelled { color: #95213d; border-color: rgba(183,43,76,.34); background: rgba(220,83,108,.12); }
+:root[data-theme="light"] .cab-calendar-day i.pending { color: #774a00; }
+:root[data-theme="light"] .cab-calendar-day i.confirmed { color: #0b5e91; }
+:root[data-theme="light"] .cab-calendar-day i.done { color: #075f46; }
+:root[data-theme="light"] .cab-calendar-day i.cancelled { color: #95213d; }
+:root[data-theme="light"] .tgapp-summary.ready { color: #075f46; border-color: rgba(12,133,94,.34); background: rgba(43,183,137,.13); }
+:root[data-theme="light"] .tgapp-summary.ready > span { color: #075f46; }
+:root[data-theme="light"] .adm-question-preview article > div span.correct { color: #075f46; }
+:root[data-theme="light"] .adm-status-symbol.success { color: #075f46; background: rgba(43,183,137,.13); }
+/* Keep a normal three-part student name legible in the header rather than
+   cutting it after a single line. Tiny phones still use the compact avatar. */
+.cab-profile-button b {
+  display: -webkit-box;
+  overflow: hidden;
+  max-height: 2.4em;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.2;
+}
+:root[data-theme="light"] .cab-next-status.done { color: #075f46; }
+:root[data-theme="light"] .cab-next-status.pending { color: #774a00; }
+:root[data-theme="light"] .cab-next-status.confirmed { color: #0b5e91; }
+:root[data-theme="light"] .cab-next-status.cancelled { color: #95213d; }
