@@ -1,0 +1,16 @@
+# Optional Blueprint when deploying the /glass folder directly from this repository.
+# It creates a SEPARATE Render service; the existing tutor-booking service is untouched.
+services:
+  - type: web
+    name: tutor-booking-glass
+    runtime: node
+    plan: free
+    rootDir: glass
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: API_ORIGIN
+        sync: false
+      - key: LEGACY_SITE_URL
+        sync: false

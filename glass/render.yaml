@@ -1,0 +1,18 @@
+# Standalone Render Blueprint for this React frontend.
+# Use this file after publishing the CONTENTS of /glass as a separate repository.
+services:
+  - type: web
+    name: tutor-booking-glass
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      # URL of the existing Tutor Booking service. It retains Sheets, Telegram,
+      # admin credentials, and all booking logic.
+      - key: API_ORIGIN
+        sync: false
+      # Existing site URL for pages intentionally left on the legacy service.
+      - key: LEGACY_SITE_URL
+        sync: false
