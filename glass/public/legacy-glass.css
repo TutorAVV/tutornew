@@ -1,7 +1,7 @@
 /*
- * Liquid-glass visual skin for the existing Cabinet, Admin, Test, and
- * Telegram flows. Their JavaScript is intentionally unchanged: this file is
- * presentation-only, so the mature booking/admin logic keeps working.
+ * Liquid-glass visual skin for the remaining legacy Telegram and Test flows.
+ * Their JavaScript is intentionally unchanged; React owns the landing,
+ * student-cabinet, and administrator workspace interfaces.
  */
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 
