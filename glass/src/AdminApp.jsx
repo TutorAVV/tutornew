@@ -47,7 +47,7 @@ import {
 } from "lucide-react";
 
 const SESSION_KEY = "adminKey";
-const ADMIN_VIEWS = ["schedule", "bookings", "slots", "students", "tests", "tg", "settings", "help"];
+const ADMIN_VIEWS = ["schedule", "bookings", "slots", "students", "tests", "homework", "tg", "settings", "help"];
 
 const FALLBACK_CONFIG = {
   tutorName: "Онлайн-уроки",
@@ -69,12 +69,21 @@ const SLOT_STATUS = {
   closed: { label: "Закрыт", tone: "closed" },
 };
 
+const HOMEWORK_STATUS = {
+  assigned: { label: "Не открыто", tone: "pending", Icon: Sparkles },
+  read: { label: "Прочитано", tone: "confirmed", Icon: CheckCircle2 },
+  completed: { label: "Выполнено", tone: "done", Icon: Check },
+  revision: { label: "На доработке", tone: "cancelled", Icon: RotateCcw },
+  accepted: { label: "Принято", tone: "done", Icon: CheckCircle2 },
+};
+
 const NAV_ITEMS = [
   ["schedule", CalendarDays, "Расписание", "Слоты и календарь"],
   ["bookings", ListTodo, "Заявки", "Записи учеников"],
   ["slots", Plus, "Слоты", "Добавить и сгенерировать"],
   ["students", UsersRound, "Ученики", "Карточки и материалы"],
   ["tests", FileText, "Тесты", "Задания и результаты"],
+  ["homework", ListTodo, "Домашнее", "Выдача и статусы"],
   ["tg", Send, "Telegram", "Диалоги и рассылки"],
   ["settings", Settings, "Настройки", "Сайт и уведомления"],
   ["help", CircleHelp, "Помощь", "Подсказки по сервису"],
@@ -225,6 +234,26 @@ async function copyText(text) {
   field.select();
   document.execCommand("copy");
   field.remove();
+}
+
+function formatFileSize(bytes) {
+  const size = Math.max(0, Number(bytes) || 0);
+  if (size < 1024) return `${size} Б`;
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} КБ`;
+  return `${Math.round(size / (1024 * 1024) * 10) / 10} МБ`;
+}
+
+function readFileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл."));
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      const comma = value.indexOf(",");
+      resolve(comma >= 0 ? value.slice(comma + 1) : value);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function promptForAi(subject, grade, topic, count, difficulty, optionsCount) {
@@ -629,6 +658,7 @@ export default function AdminApp() {
     if (view === "slots") return <SlotsView {...common} onScheduleChanged={() => loadSchedule().catch(() => {})} />;
     if (view === "students") return <StudentsView {...common} students={students} state={studentsState} onReload={refreshStudents} />;
     if (view === "tests") return <TestsView {...common} students={students} ensureStudents={ensureStudents} />;
+    if (view === "homework") return <HomeworkView {...common} students={students} ensureStudents={ensureStudents} />;
     if (view === "tg") return <TelegramView {...common} />;
     if (view === "settings") return <SettingsView {...common} onSaved={(settings) => setConfig((current) => ({ ...current, ...settings }))} />;
     if (view === "help") return <HelpView />;
@@ -710,9 +740,9 @@ function AdminLogin({ config, error, busy, onSubmit, theme, onTheme }) {
     <header className="adm-auth-top"><a href="/" className="brand-lockup"><BrandMark /><span>{config.tutorName || "Онлайн-уроки"}</span></a><IconButton label={theme === "dark" ? "Светлая тема" : "Тёмная тема"} onClick={onTheme}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</IconButton></header>
     <section className="adm-login-card glass">
       <div className="adm-login-emblem"><ShieldCheck size={30} /></div>
-      <span className="eyebrow"><LockKeyhole size={13} /> Только для преподавателя</span>
+      <p className="adm-login-audience">Только для преподавателя</p>
       <h1>Панель управления<br /><i>без лишнего.</i></h1>
-      <p>Расписание, ученики, тесты и диалоги — в одном спокойном рабочем пространстве.</p>
+      <p>Расписание, ученики, тесты, домашние задания и диалоги — в одном спокойном рабочем пространстве.</p>
       <form onSubmit={submit}>
         <label className="field-label" htmlFor="admin-password">Пароль администратора</label>
         <div className="password-field"><KeyRound size={18} /><input id="admin-password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Введите пароль" autoFocus /><button type="button" aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"} onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Скрыть" : "Показать"}</button></div>
@@ -914,7 +944,7 @@ function StudentsView({ request, notify, ask, students, state, onReload }) {
   const [draft, setDraft] = useState(null);
   const [notes, setNotes] = useState([]);
   const [notesState, setNotesState] = useState({ loading: false, error: "" });
-  const [noteDraft, setNoteDraft] = useState({ type: "homework", text: "", link: "", sendCab: true, sendTg: false });
+  const [noteDraft, setNoteDraft] = useState({ type: "info", text: "", link: "", sendCab: true, sendTg: false });
   const [saveBusy, setSaveBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [topicsModal, setTopicsModal] = useState(null);
@@ -932,7 +962,7 @@ function StudentsView({ request, notify, ask, students, state, onReload }) {
   useEffect(() => {
     if (!selected) { setDraft(null); return; }
     setDraft({ phone: selected.phone || "", name: selected.name || "", grade: selected.grade || "", subject: selected.subject || "", chat_id: selected.chat_id || "", topics: selected.topics || "", notes: selected.notes || "" });
-    setNoteDraft({ type: "homework", text: "", link: "", sendCab: true, sendTg: Boolean(selected.chat_id) });
+    setNoteDraft({ type: "info", text: "", link: "", sendCab: true, sendTg: Boolean(selected.chat_id) });
   }, [selected?.phone, selected?.name, selected?.grade, selected?.subject, selected?.chat_id, selected?.topics, selected?.notes]);
 
   const loadNotes = useCallback(async (phone) => {
@@ -996,8 +1026,8 @@ function StudentsView({ request, notify, ask, students, state, onReload }) {
     {students.length > 0 && <div className="adm-students-layout"><aside className="adm-student-list glass"><div className="adm-student-list-head"><div><b>Ученики</b><span>{students.length} всего</span></div><label className="adm-search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти ученика" /></label></div><div className="adm-student-scroll">{visible.map((student) => <button type="button" key={student.phone} className={selected?.phone === student.phone ? "active" : ""} onClick={() => chooseStudent(student.phone)}><span>{String(student.name || "У").trim().charAt(0).toUpperCase()}</span><div><b>{student.name || "Без имени"}{student.chat_id && <em title="Telegram привязан">✈</em>}</b><small>{student.phone}{student.grade ? ` · ${student.grade}` : ""}</small><i>уроков: {student.stats?.done || 0} · впереди: {student.stats?.upcoming || 0}</i></div></button>)}{!visible.length && <p className="adm-small-empty">Поиск ничего не нашёл.</p>}</div></aside>
       {selected && draft && <article className="adm-student-detail"><header className="adm-student-hero glass"><div className="adm-avatar">{String(selected.name || "У").trim().charAt(0).toUpperCase()}</div><div><span className="eyebrow">Карточка ученика</span><h2>{selected.name || "Без имени"}</h2><p><a href={`tel:${selected.phone}`}>{selected.phone}</a>{selected.tg && selected.tg !== "@" ? ` · ${selected.tg}` : ""}{selected.chat_id ? " · Telegram привязан" : " · Telegram не привязан"} · <a href={`/cabinet?phone=${encodeURIComponent(selected.phone)}`} target="_blank" rel="noreferrer">кабинет ↗</a></p></div></header><div className="adm-student-stats">{[[selected.stats?.done || 0, "проведено"], [selected.stats?.upcoming || 0, "впереди"], [selected.stats?.cancelled || 0, "отменено"], [selected.stats?.lastDone ? formatDate(selected.stats.lastDone, { day: "2-digit", month: "2-digit", year: "numeric" }) : "—", "последний урок"]].map(([value, label]) => <div key={label} className="glass"><b>{value}</b><span>{label}</span></div>)}</div>
         <form className="adm-detail-card glass" onSubmit={save}><div className="adm-section-title"><div><span className="eyebrow">Учебный профиль</span><h3>Контекст занятий</h3></div><UserRound size={19} /></div><div className="adm-form-grid two"><label><span className="field-label">ФИО ученика</span><input value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} /></label><label><span className="field-label">Класс</span><input value={draft.grade} onChange={(event) => updateDraft("grade", event.target.value)} placeholder="Например, 7 класс" /></label><label><span className="field-label">Предмет</span><input value={draft.subject} onChange={(event) => updateDraft("subject", event.target.value)} placeholder="Математика" /></label><label><span className="field-label">Chat ID Telegram</span><input value={draft.chat_id} onChange={(event) => updateDraft("chat_id", event.target.value)} placeholder="Появится после /start + номер" /></label></div><label><span className="field-label">Пройденные темы <small>видит ученик</small></span><textarea rows="4" value={draft.topics} onChange={(event) => updateDraft("topics", event.target.value)} placeholder="Можно выбрать из каталога или написать вручную" /></label><div className="adm-inline-actions"><button type="button" className="button button-quiet" onClick={loadTopicPicker}><BookOpen size={16} />Выбрать из списка</button><span>Темы отображаются в кабинете ученика.</span></div><label><span className="field-label">Заметки для себя <small>ученик не видит</small></span><textarea rows="3" value={draft.notes} onChange={(event) => updateDraft("notes", event.target.value)} /></label><div className="adm-form-submit"><button className="button button-primary" type="submit" disabled={saveBusy}>{saveBusy ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}Сохранить карточку</button></div></form>
-        <form className="adm-detail-card glass" onSubmit={sendNote}><div className="adm-section-title"><div><span className="eyebrow">Связь с учеником</span><h3>Отправить материал</h3></div><Send size={19} /></div><div className="adm-form-grid two"><label><span className="field-label">Тип</span><select value={noteDraft.type} onChange={(event) => setNoteDraft((current) => ({ ...current, type: event.target.value }))}><option value="homework">📝 Домашнее задание</option><option value="info">ℹ️ Сообщение</option><option value="link">🔗 Ссылка и материалы</option></select></label><label><span className="field-label">Ссылка <small>необязательно</small></span><input type="url" value={noteDraft.link} onChange={(event) => setNoteDraft((current) => ({ ...current, link: event.target.value }))} placeholder="https://…" /></label></div><label><span className="field-label">Текст</span><textarea rows="4" value={noteDraft.text} onChange={(event) => setNoteDraft((current) => ({ ...current, text: event.target.value }))} placeholder="Например: №245–250 из учебника, повторить формулы…" /></label><div className="adm-destination-row"><label><input type="checkbox" checked={noteDraft.sendCab} onChange={(event) => setNoteDraft((current) => ({ ...current, sendCab: event.target.checked }))} />В кабинет</label><label className={!selected.chat_id ? "disabled" : ""}><input type="checkbox" checked={noteDraft.sendTg} disabled={!selected.chat_id} onChange={(event) => setNoteDraft((current) => ({ ...current, sendTg: event.target.checked }))} />В Telegram{!selected.chat_id && " · не привязан"}</label></div><div className="adm-form-submit"><button className="button button-primary" type="submit" disabled={sendBusy}>{sendBusy ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}Отправить</button></div></form>
-        <section className="adm-detail-card glass adm-note-history"><div className="adm-section-title"><div><span className="eyebrow">История</span><h3>Сообщения ученику</h3></div><button className="text-action" type="button" onClick={() => loadNotes(selected.phone)}><RefreshCw size={14} />Обновить</button></div>{notesState.loading && <LoadingPanel label="Загружаем историю" />}{notesState.error && <InlineError onRetry={() => loadNotes(selected.phone)}>{notesState.error}</InlineError>}{!notesState.loading && !notesState.error && !notes.length && <p className="adm-small-empty">Сообщений ученику ещё не было.</p>}{!notesState.loading && notes.map((note) => <article className="adm-note-item" key={note.id}><span>{note.type === "homework" ? "📝" : note.type === "link" ? "🔗" : note.type === "test" ? "🧪" : "ℹ️"}</span><div><small>{formatDateTime(note.ts)}</small><p>{note.text}</p>{note.link && <a href={note.link} target="_blank" rel="noreferrer">Открыть ссылку <ExternalLink size={12} /></a>}</div><IconButton label="Удалить сообщение" className="danger" onClick={() => deleteNote(note)}><Trash2 size={15} /></IconButton></article>)}</section>
+        <form className="adm-detail-card glass" onSubmit={sendNote}><div className="adm-section-title"><div><span className="eyebrow">Экстренный канал</span><h3>Важное сообщение</h3></div><CircleAlert size={19} /></div><p className="adm-detail-lead">Сохраняется на главной странице кабинета ученика и появляется там, только когда есть важное сообщение.</p><label><span className="field-label">Текст сообщения</span><textarea rows="4" value={noteDraft.text} onChange={(event) => setNoteDraft((current) => ({ ...current, text: event.target.value }))} placeholder="Например: сегодняшнее занятие начнётся на 15 минут позже…" /></label><label><span className="field-label">Ссылка <small>необязательно</small></span><input type="url" value={noteDraft.link} onChange={(event) => setNoteDraft((current) => ({ ...current, link: event.target.value }))} placeholder="https://…" /></label><div className="adm-destination-row"><label><input type="checkbox" checked={noteDraft.sendCab} onChange={(event) => setNoteDraft((current) => ({ ...current, sendCab: event.target.checked }))} />Показать на главной кабинета</label><label className={!selected.chat_id ? "disabled" : ""}><input type="checkbox" checked={noteDraft.sendTg} disabled={!selected.chat_id} onChange={(event) => setNoteDraft((current) => ({ ...current, sendTg: event.target.checked }))} />Продублировать в Telegram{!selected.chat_id && " · не привязан"}</label></div><div className="adm-form-submit"><button className="button button-primary" type="submit" disabled={sendBusy}>{sendBusy ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}Отправить важное</button></div></form>
+        <section className="adm-detail-card glass adm-note-history"><div className="adm-section-title"><div><span className="eyebrow">История</span><h3>Экстренные сообщения</h3></div><button className="text-action" type="button" onClick={() => loadNotes(selected.phone)}><RefreshCw size={14} />Обновить</button></div>{notesState.loading && <LoadingPanel label="Загружаем историю" />}{notesState.error && <InlineError onRetry={() => loadNotes(selected.phone)}>{notesState.error}</InlineError>}{!notesState.loading && !notesState.error && !notes.length && <p className="adm-small-empty">Экстренных сообщений ученику ещё не было.</p>}{!notesState.loading && notes.map((note) => <article className="adm-note-item" key={note.id}><span>{note.type === "homework" ? "📝" : note.type === "link" ? "🔗" : note.type === "test" ? "🧪" : "⚠️"}</span><div><small>{formatDateTime(note.ts)}</small><p>{note.text}</p>{note.link && <a href={note.link} target="_blank" rel="noreferrer">Открыть ссылку <ExternalLink size={12} /></a>}</div><IconButton label="Удалить сообщение" className="danger" onClick={() => deleteNote(note)}><Trash2 size={15} /></IconButton></article>)}</section>
       </article>}
     </div>}
     {topicsModal && <TopicsPickerModal catalog={topicsCatalog} source={topicsSource} selection={topicsModal.selection} loading={topicsLoading} onClose={() => setTopicsModal(null)} onToggle={(subject, grade, topic) => setTopicsModal((current) => {
@@ -1011,6 +1041,133 @@ function StudentsView({ request, notify, ask, students, state, onReload }) {
 
 function TopicsPickerModal({ catalog, source, selection, loading, onClose, onToggle, onSave }) {
   return <Modal title="Выберите пройденные темы" onClose={onClose} wide className="adm-topics-modal"><p className="adm-modal-lead">{source === "table" ? "Каталог загружен из таблицы. Отметьте темы, которые уже прошли с учеником." : "Школьный каталог по предметам и классам. Отметьте только актуальные темы."}</p>{loading && <LoadingPanel label="Загружаем каталог тем" />}{!loading && !Object.keys(catalog).length && <InlineError>Каталог недоступен. Темы можно вписать вручную в карточке.</InlineError>}{!loading && Object.entries(catalog).map(([subject, grades]) => <section className="adm-topic-subject" key={subject}><h3>{subject}</h3><div>{Object.entries(grades || {}).map(([grade, topics]) => <article key={grade}><b>{grade}</b>{(topics || []).map((topic) => <label key={topic}><input type="checkbox" checked={Boolean(selection?.[subject]?.[grade]?.[topic])} onChange={() => onToggle(subject, grade, topic)} />{topic}</label>)}</article>)}</div></section>)}<div className="adm-modal-actions"><button className="button button-quiet" type="button" onClick={onClose}>Отмена</button><button className="button button-primary" type="button" disabled={loading || !Object.keys(catalog).length} onClick={onSave}><Check size={16} />Подставить темы</button></div></Modal>;
+}
+
+function HomeworkView({ request, notify, ask, students, ensureStudents }) {
+  const [homework, setHomework] = useState([]);
+  const [state, setState] = useState({ loading: true, error: "" });
+  const [filter, setFilter] = useState("all");
+  const [composer, setComposer] = useState(null);
+  const loadHomework = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setState({ loading: true, error: "" });
+    try {
+      const data = await request("/api/admin/homework");
+      const list = Array.isArray(data.homework) ? data.homework : [];
+      setHomework(list);
+      setState({ loading: false, error: "" });
+      return list;
+    } catch (error) {
+      setState({ loading: false, error: safeError(error) });
+      throw error;
+    }
+  }, [request]);
+
+  useEffect(() => { loadHomework().catch(() => {}); }, [loadHomework]);
+
+  const totals = useMemo(() => homework.reduce((result, item) => {
+    result.all += 1;
+    result[item.status] = (result[item.status] || 0) + 1;
+    return result;
+  }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0 }), [homework]);
+  const shown = useMemo(() => homework.filter((item) => filter === "all" || item.status === filter), [filter, homework]);
+  const assign = async () => {
+    try {
+      const roster = await ensureStudents();
+      if (!roster?.length) { notify("Сначала добавьте ученика через запись на занятие или карточку ученика.", "error"); return; }
+      setComposer({ students: roster });
+    } catch (error) { notify(safeError(error), "error"); }
+  };
+  const setStatus = async (item, status) => {
+    try {
+      const data = await request(`/api/admin/homework/${encodeURIComponent(item.id)}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      setHomework((current) => current.map((entry) => entry.id === item.id ? data.homework : entry));
+      notify(status === "accepted" ? "Задание отмечено как принятое." : status === "revision" ? "Задание возвращено на доработку." : "Статус задания обновлён.");
+    } catch (error) { notify(safeError(error), "error"); }
+  };
+  const remove = (item) => ask({
+    title: "Удалить домашнее задание?",
+    description: `Задание «${item.title}» сразу исчезнет из кабинета ${item.studentName || "ученика"}. Вложенные файлы останутся в хранилище, чтобы не удалить общий материал случайно.`,
+    confirmLabel: "Удалить задание",
+    danger: true,
+    action: async () => {
+      await request(`/api/admin/homework/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      setHomework((current) => current.filter((entry) => entry.id !== item.id));
+      notify("Домашнее задание удалено.");
+    },
+  });
+
+  return <section className="adm-page">
+    <PageHeader eyebrow="Индивидуальные задания" title="Домашнее" accent="и прогресс." description="Выдавайте задание одному ученику, прикладывайте материалы и сразу видьте, прочитал ли он его и отметил ли выполнение." actions={<><button className="button button-quiet" type="button" onClick={() => loadHomework().catch(() => {})} disabled={state.loading}>{state.loading ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}Обновить</button><button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button></>} />
+    <section className="adm-metric-grid adm-homework-metrics">
+      <Metric icon={<ListTodo size={19} />} label="Всего заданий" value={totals.all} hint="Видны преподавателю" />
+      <Metric icon={<Sparkles size={19} />} label="Не открыто" value={totals.assigned} hint="Ждут ученика" tone="orange" />
+      <Metric icon={<Clock3 size={19} />} label="В работе" value={(totals.read || 0) + (totals.revision || 0)} hint="Прочитано или дорабатывается" tone="violet" />
+      <Metric icon={<CheckCircle2 size={19} />} label="Готово" value={(totals.completed || 0) + (totals.accepted || 0)} hint="Отмечено учеником" tone="mint" />
+    </section>
+    <section className="adm-homework-toolbar glass"><div><b>Статус</b><span>Показывайте только нужные задания</span></div><div className="adm-homework-filters">{[["all", "Все"], ["assigned", "Не открыто"], ["read", "В работе"], ["completed", "Выполнено"], ["revision", "Доработка"], ["accepted", "Принято"]].map(([value, label]) => <button type="button" key={value} className={filter === value ? "active" : ""} onClick={() => setFilter(value)}>{label}<b>{totals[value] || 0}</b></button>)}</div></section>
+    {state.loading && !homework.length && <LoadingPanel label="Загружаем домашние задания" />}
+    {state.error && !homework.length && <InlineError onRetry={() => loadHomework().catch(() => {})}>{state.error}</InlineError>}
+    {!state.loading && !state.error && !homework.length && <EmptyState icon={<ListTodo size={30} />} title="Домашних заданий пока нет" text="Выдайте первое индивидуальное задание — ученик увидит его в новом разделе «Домашнее» своего кабинета." action={<button className="button button-primary" type="button" onClick={assign}><Plus size={16} />Выдать задание</button>} />}
+    {!state.loading && Boolean(homework.length) && !shown.length && <EmptyState icon={<ListTodo size={28} />} title="В этом статусе пока пусто" text="Выберите другой фильтр, чтобы увидеть остальные задания." />}
+    {!state.loading && Boolean(shown.length) && <div className="adm-homework-list">{shown.map((item) => <AdminHomeworkCard key={item.id} item={item} onStatus={setStatus} onDelete={remove} />)}</div>}
+    {composer && <HomeworkComposerModal students={composer.students} request={request} notify={notify} onClose={() => setComposer(null)} onSaved={(item, delivery) => { setHomework((current) => [item, ...current]); setComposer(null); const deliveryText = delivery === "sent" ? " Ещё и отправлено в Telegram." : delivery === "no-chat" ? " Telegram пока не привязан." : ""; notify(`Задание выдано и появилось в кабинете ученика.${deliveryText}`); }} />}
+  </section>;
+}
+
+function AdminHomeworkCard({ item, onStatus, onDelete }) {
+  const status = HOMEWORK_STATUS[item.status] || HOMEWORK_STATUS.assigned;
+  const StatusIcon = status.Icon;
+  const progress = item.status === "assigned" ? "Ученик ещё не открывал задание" : item.status === "read" ? `Прочитано ${formatDateTime(item.openedAt)}` : item.status === "completed" ? `Выполнено ${formatDateTime(item.completedAt)}` : item.status === "revision" ? `Возвращено на доработку ${formatDateTime(item.returnedAt)}` : `Принято ${formatDateTime(item.acceptedAt)}`;
+  return <article className={`adm-homework-card glass ${item.status}`}>
+    <header><div className="adm-homework-card-title"><span className="adm-homework-card-icon"><ListTodo size={19} /></span><div><small>{item.dueDate ? `Срок: ${formatDate(item.dueDate, { day: "numeric", month: "long", year: "numeric" })}` : "Без срока"}</small><h2>{item.title}</h2></div></div><span className={`adm-homework-status ${status.tone}`}><StatusIcon size={14} />{status.label}</span></header>
+    <div className="adm-homework-card-grid"><div><span className="adm-homework-label">Ученик</span><b>{item.studentName || "Без имени"}</b><small>{item.phone}</small></div><div><span className="adm-homework-label">Прогресс</span><b>{progress}</b><small>{item.assignedAt ? `Выдано ${formatDateTime(item.assignedAt)}` : ""}</small></div></div>
+    {item.text && <p className="adm-homework-copy">{item.text}</p>}
+    {(item.link || item.attachments?.length) && <div className="adm-homework-resources"><span>Материалы</span>{item.link && <a href={item.link} target="_blank" rel="noreferrer"><Link2 size={14} />Ссылка <ExternalLink size={12} /></a>}{item.attachments?.map((attachment) => <a href={attachment.url} target="_blank" rel="noreferrer" key={attachment.id || attachment.url}><FileText size={14} />{attachment.name} {attachment.size ? `· ${formatFileSize(attachment.size)}` : ""}<ExternalLink size={12} /></a>)}</div>}
+    <footer><div className="adm-homework-card-actions">{item.status === "completed" && <><button className="button button-primary" type="button" onClick={() => onStatus(item, "accepted")}><Check size={15} />Принять</button><button className="button button-quiet" type="button" onClick={() => onStatus(item, "revision")}><RotateCcw size={15} />На доработку</button></>}{item.status === "revision" && <button className="button button-primary" type="button" onClick={() => onStatus(item, "accepted")}><Check size={15} />Принять</button>}{item.status === "accepted" && <button className="button button-quiet" type="button" onClick={() => onStatus(item, "assigned")}><RotateCcw size={15} />Сбросить статус</button>}</div><IconButton label="Удалить домашнее задание" className="danger" onClick={() => onDelete(item)}><Trash2 size={16} /></IconButton></footer>
+  </article>;
+}
+
+function HomeworkComposerModal({ students, request, notify, onClose, onSaved }) {
+  const [target, setTarget] = useState(() => students[0]?.phone || "");
+  const [draft, setDraft] = useState({ title: "", text: "", link: "", dueDate: "" });
+  const [attachments, setAttachments] = useState([]);
+  const [sendTg, setSendTg] = useState(Boolean(students[0]?.chat_id));
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const selected = students.find((student) => student.phone === target);
+  useEffect(() => {
+    if (!students.some((student) => student.phone === target)) setTarget(students[0]?.phone || "");
+  }, [students, target]);
+  useEffect(() => { if (!selected?.chat_id) setSendTg(false); }, [selected?.chat_id]);
+  const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const uploadFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    const room = Math.max(0, 5 - attachments.length);
+    if (!room) { notify("К одному заданию можно прикрепить до 5 файлов.", "error"); return; }
+    setUploading(true);
+    try {
+      for (const file of files.slice(0, room)) {
+        if (file.size > 6 * 1024 * 1024) { notify(`«${file.name}» больше 6 МБ и не был загружен.`, "error"); continue; }
+        const data = await readFileBase64(file);
+        const response = await request("/api/admin/homework/attachments", { method: "POST", body: JSON.stringify({ name: file.name, mimeType: file.type, data }) });
+        if (response.attachment?.url) setAttachments((current) => [...current, response.attachment]);
+      }
+    } catch (error) { notify(safeError(error, "Не удалось загрузить файл."), "error"); }
+    finally { setUploading(false); }
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!target) { notify("Выберите ученика.", "error"); return; }
+    setSaving(true);
+    try {
+      const response = await request("/api/admin/homework", { method: "POST", body: JSON.stringify({ phone: target, ...draft, attachments, sendTg }) });
+      onSaved(response.homework, response.tg);
+    } catch (error) { notify(safeError(error), "error"); }
+    finally { setSaving(false); }
+  };
+  return <Modal title="Выдать домашнее задание" onClose={saving || uploading ? undefined : onClose} wide className="adm-homework-modal"><form onSubmit={submit}><p className="adm-modal-lead">Задание увидит только выбранный ученик. После открытия и отметки о выполнении его статус сразу отразится в этом списке.</p><div className="adm-form-grid two"><label><span className="field-label">Ученик</span><select value={target} onChange={(event) => setTarget(event.target.value)} required><option value="">Выберите ученика</option>{students.map((student) => <option key={student.phone} value={student.phone}>{student.name || "Без имени"} · {student.phone}{student.grade ? ` · ${student.grade}` : ""}</option>)}</select></label><label><span className="field-label">Срок <small>необязательно</small></span><input type="date" value={draft.dueDate} onChange={(event) => update("dueDate", event.target.value)} /></label></div><label><span className="field-label">Название задания</span><input value={draft.title} onChange={(event) => update("title", event.target.value)} placeholder="Например, Дроби: задачи 12–18" maxLength="220" required autoFocus /></label><label><span className="field-label">Инструкция</span><textarea rows="6" value={draft.text} onChange={(event) => update("text", event.target.value)} placeholder="Что сделать, на что обратить внимание и как подготовиться к следующему уроку…" maxLength="6000" /></label><label><span className="field-label">Ссылка на материал <small>необязательно</small></span><input type="url" value={draft.link} onChange={(event) => update("link", event.target.value)} placeholder="https://drive.google.com/…" maxLength="1600" /></label><section className="adm-homework-attachments"><div><span className="field-label">Вложения <small>до 5 файлов, каждый до 6 МБ</small></span><label className={`adm-upload-control ${uploading ? "busy" : ""}`}><input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp,.zip" onChange={uploadFiles} disabled={uploading || saving || attachments.length >= 5} /><FileText size={17} /><span>{uploading ? "Загружаем файл…" : "Добавить файл"}</span></label></div>{attachments.length > 0 && <div className="adm-uploaded-files">{attachments.map((attachment) => <div key={attachment.id || attachment.url}><FileText size={15} /><span><b>{attachment.name}</b><small>{attachment.size ? formatFileSize(attachment.size) : "Файл прикреплён"}</small></span><button type="button" onClick={() => setAttachments((current) => current.filter((entry) => (entry.id || entry.url) !== (attachment.id || attachment.url)))} aria-label={`Убрать ${attachment.name}`} disabled={saving}>×</button></div>)}</div>}</section><div className="adm-destination-row"><label className={!selected?.chat_id ? "disabled" : ""}><input type="checkbox" checked={sendTg} disabled={!selected?.chat_id} onChange={(event) => setSendTg(event.target.checked)} />Продублировать ученику в Telegram{!selected?.chat_id && " · не привязан"}</label></div><div className="adm-modal-actions"><button className="button button-quiet" type="button" onClick={onClose} disabled={saving || uploading}>Отмена</button><button className="button button-primary" type="submit" disabled={saving || uploading}>{saving ? <LoaderCircle className="spin" size={16} /> : <Send size={16} />}Выдать задание</button></div></form></Modal>;
 }
 
 function TestsView({ request, notify, ask, students, ensureStudents }) {

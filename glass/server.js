@@ -8,7 +8,7 @@ require("dotenv").config();
  *  - ПЕРЕНОС занятия учеником (не позже чем за N часов, N — настройка), отмена — только у преподавателя
  *  - настройки сайта, которые преподаватель меняет в админке (хранятся в таблице, лист Settings)
  *  - Telegram-бот: вебхук, пользователи бота, переписка, рассылка (лист Users / Messages)
- *  - ученики и личный кабинет (лист Students / Notes)
+ *  - ученики, кабинет и домашние задания (листы Students / Notes / Homework)
  *
  * Хранение: Google Apps Script + Таблица (прод) или data/db.json (демо).
  */
@@ -92,11 +92,18 @@ const TOPICS_CATALOG = {
 };
 
 app.use(cors());
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "9mb" }));
 
 // ---------- helpers ----------
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
+const HOMEWORK_UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+const HOMEWORK_FILE_MAX_BYTES = 6 * 1024 * 1024;
+const HOMEWORK_FILE_EXTENSIONS = new Set([
+  ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".doc", ".docx",
+  ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".zip",
+]);
+const HOMEWORK_STATUSES = new Set(["assigned", "read", "completed", "revision", "accepted"]);
 
 function isDateStr(s) { return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s); }
 function isTimeStr(s) { return typeof s === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s); }
@@ -121,6 +128,88 @@ function toIso(d) { // "ДД.ММ.ГГГГ" | ISO → ISO
 }
 function toDsp(iso) { return isDateStr(iso) ? `${iso.slice(8)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : String(iso || ""); }
 function newId(prefix) { return (prefix || "X") + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase(); }
+
+function safeExternalUrl(value, limit = 1600) {
+  const text = esc(value, limit).trim();
+  if (!text || !/^https?:\/\//i.test(text)) return "";
+  try {
+    const url = new URL(text);
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch (_error) { return ""; }
+}
+function safeHomeworkFileName(value) {
+  const raw = String(value || "attachment").replace(/[\\/:*?"<>|\x00-\x1f]/g, "-").replace(/\s+/g, " ").trim();
+  return (raw || "attachment").slice(0, 140);
+}
+function homeworkFileExtension(name) { return path.extname(String(name || "")).toLowerCase(); }
+function acceptsHomeworkFile(name, mimeType = "") {
+  const ext = homeworkFileExtension(name);
+  if (HOMEWORK_FILE_EXTENSIONS.has(ext)) return true;
+  return /^(image\/(png|jpeg|webp|gif)|application\/(pdf|msword|vnd\.(openxmlformats-officedocument|ms-excel|ms-powerpoint)|vnd\.oasis\.opendocument)|text\/plain)$/i.test(String(mimeType || ""));
+}
+function safeHomeworkAttachmentUrl(value) {
+  const text = String(value || "").trim();
+  if (/^\/uploads\/[A-Za-z0-9._-]+$/.test(text)) return text;
+  return safeExternalUrl(text);
+}
+function parseHomeworkAttachments(value) {
+  let raw = value;
+  if (typeof raw === "string") {
+    try { raw = JSON.parse(raw); } catch (_error) { raw = []; }
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 5).map((item) => {
+    const source = item && typeof item === "object" ? item : {};
+    const url = safeHomeworkAttachmentUrl(source.url);
+    if (!url) return null;
+    return {
+      id: esc(source.id, 80),
+      name: safeHomeworkFileName(source.name || "Вложение"),
+      url,
+      mimeType: esc(source.mimeType, 120),
+      size: Math.max(0, Math.min(HOMEWORK_FILE_MAX_BYTES, +source.size || 0)),
+    };
+  }).filter(Boolean);
+}
+function homeworkStatus(value) {
+  const status = String(value || "assigned");
+  return HOMEWORK_STATUSES.has(status) ? status : "assigned";
+}
+function homeworkView(row) {
+  return {
+    id: String(row.id || ""),
+    phone: String(row.phone || ""),
+    studentName: esc(row.studentName || row.name, 160),
+    title: esc(row.title || "Домашнее задание", 220),
+    text: esc(row.text, 6000),
+    link: safeExternalUrl(row.link),
+    dueDate: isDateStr(String(row.dueDate || "")) ? String(row.dueDate) : "",
+    attachments: parseHomeworkAttachments(row.attachments),
+    status: homeworkStatus(row.status),
+    assignedAt: String(row.assignedAt || row.createdAt || ""),
+    openedAt: String(row.openedAt || ""),
+    completedAt: String(row.completedAt || ""),
+    returnedAt: String(row.returnedAt || ""),
+    acceptedAt: String(row.acceptedAt || ""),
+    updatedAt: String(row.updatedAt || ""),
+  };
+}
+function buildStudentHomework(phone, rows) {
+  return rows.filter((row) => samePhone(row.phone, phone) && flagOn(row.visible))
+    .map(homeworkView)
+    .sort((a, b) => {
+      const aDate = a.dueDate || "9999-12-31";
+      const bDate = b.dueDate || "9999-12-31";
+      if (aDate !== bDate) return aDate.localeCompare(bDate);
+      return String(b.assignedAt).localeCompare(String(a.assignedAt));
+    });
+}
+function homeworkAttachmentPublicUrl(req, attachment) {
+  const url = String(attachment?.url || "");
+  if (!url.startsWith("/")) return url;
+  const origin = PUBLIC_URL || `${req.protocol}://${req.get("host")}`;
+  return `${origin}${url}`;
+}
 
 /** Начало занятия в UTC мс (дата/время указаны в часовом поясе преподавателя) */
 function startUtc(dateIso, time, tzOffsetMin) {
@@ -192,7 +281,7 @@ async function appsScript(action, payload = {}, method = "GET") {
 }
 
 /**
- * Универсальные таблицы: Settings, Users, Messages, Students, Notes.
+ * Универсальные таблицы: Settings, Users, Messages, Students, Notes, Homework.
  * В проде — листы Google Таблицы (создаются сами), в демо — db.tables.
  */
 const tbl = {
@@ -663,16 +752,16 @@ function studentStats(phone, bookings, cfg) {
 
 /** Кабинет ученика: главная страница (тестовый режим, вход по телефону без пароля).
  *  Держим её лёгкой: остальное (расписание, тесты, сообщения) подгружается отдельными
- *  запросами при открытии соответствующих разделов кабинета (#/schedule, #/tests, …). */
+ *  запросами при открытии соответствующих разделов кабинета (#/schedule, #/tests, #/homework, …). */
 app.get("/api/cabinet", async (req, res) => {
   const phone = req.query.phone || "";
   if (digits(phone).length < 10) return res.status(400).json({ ok: false, error: "Укажите телефон" });
   try {
     const cfg = await publicConfig();
     if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
-    const [students, bookings, notes, users, assigns, tests, rawLessons] = await Promise.all([
+    const [students, bookings, notes, users, assigns, tests, homeworkRows, rawLessons] = await Promise.all([
       tbl.list("Students"), allBookings(), tbl.list("Notes"), tbl.list("Users"),
-      tbl.list("TestAssign"), tbl.list("Tests"), cabinetLessons(phone),
+      tbl.list("TestAssign"), tbl.list("Tests"), tbl.list("Homework"), cabinetLessons(phone),
     ]);
     const lessons = decorateCabinetLessons(rawLessons, cfg);
     const st = students.find((x) => samePhone(x.phone, phone));
@@ -684,6 +773,12 @@ app.get("/api/cabinet", async (req, res) => {
     const next = upcoming.length ? upcoming[0] : null;
     const myTests = buildMyTests(phone, assigns, tests);
     const myNotes = buildMyNotes(phone, notes);
+    const emergencyMessages = myNotes.filter((note) => note.type === "info");
+    const myHomework = buildStudentHomework(phone, homeworkRows);
+    const rescheduleLessons = upcoming.filter((lesson) => lesson.canReschedule).map((lesson) => ({
+      id: lesson.id, iso: lesson.iso, dsp: lesson.dsp, time: lesson.time, subject: lesson.subject,
+      status: lesson.status, canReschedule: lesson.canReschedule, hoursLeft: lesson.hoursLeft,
+    }));
     const tgLinked = !!(st && st.chat_id) || users.some((u) => u.phone && samePhone(u.phone, phone));
     res.json({
       ok: true,
@@ -697,7 +792,13 @@ app.get("/api/cabinet", async (req, res) => {
         canReschedule: next.canReschedule, hoursLeft: next.hoursLeft,
       } : null,
       upcomingTotal: upcoming.length,
-      testsCount: myTests.length, notesCount: myNotes.length,
+      rescheduleLessons,
+      testsCount: myTests.length,
+      homeworkCount: myHomework.filter((item) => !["completed", "accepted"].includes(item.status)).length,
+      emergencyMessages,
+      emergencyMessagesCount: emergencyMessages.length,
+      // Retained for older cabinet clients that still show their materials counter.
+      notesCount: myNotes.length,
       tgLinked,
       rescheduleHours: cfg.rescheduleHours, tzLabel: cfg.tzLabel,
     });
@@ -724,6 +825,66 @@ app.get("/api/cabinet/tests", (req, res) => cabinetSection(req, res, async () =>
 app.get("/api/cabinet/notes", (req, res) => cabinetSection(req, res, async () => ({
   ok: true, notes: buildMyNotes(req.query.phone || "", await tbl.list("Notes")),
 })));
+
+/** Structured homework remains separate from legacy Notes: each assignment has its
+ * own learner lifecycle (new → opened → completed → checked) and may include
+ * Google Drive or local attachment links. Legacy material notes are exposed for
+ * a gentle transition, but emergency Notes are deliberately kept on the dashboard. */
+app.get("/api/cabinet/homework", (req, res) => cabinetSection(req, res, async () => {
+  const phone = req.query.phone || "";
+  const [rows, notes] = await Promise.all([tbl.list("Homework"), tbl.list("Notes")]);
+  return {
+    ok: true,
+    homework: buildStudentHomework(phone, rows),
+    legacyNotes: buildMyNotes(phone, notes).filter((note) => note.type !== "info"),
+  };
+}));
+
+app.post("/api/cabinet/homework/:id/open", async (req, res) => {
+  const phone = (req.body || {}).phone || "";
+  const id = String(req.params.id || "");
+  if (!id || digits(phone).length < 10) return res.status(400).json({ ok: false, error: "Укажите номер телефона" });
+  try {
+    const cfg = await publicConfig();
+    if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
+    const rows = await tbl.list("Homework");
+    const row = rows.find((item) => String(item.id) === id && samePhone(item.phone, phone) && flagOn(item.visible));
+    if (!row) return res.status(404).json({ ok: false, error: "Задание не найдено" });
+    const currentStatus = homeworkStatus(row.status);
+    const patch = currentStatus === "assigned" ? { status: "read", openedAt: row.openedAt || new Date().toISOString(), updatedAt: new Date().toISOString() } : {};
+    if (Object.keys(patch).length) await tbl.update("Homework", "id", id, patch);
+    res.json({ ok: true, homework: homeworkView({ ...row, ...patch }) });
+  } catch (error) { console.error("homework open:", error); res.status(500).json({ ok: false, error: "Не удалось открыть задание" }); }
+});
+
+app.post("/api/cabinet/homework/:id/status", async (req, res) => {
+  const body = req.body || {};
+  const phone = body.phone || "";
+  const id = String(req.params.id || "");
+  const desired = String(body.status || "");
+  if (!id || digits(phone).length < 10) return res.status(400).json({ ok: false, error: "Укажите номер телефона" });
+  if (!["read", "completed"].includes(desired)) return res.status(400).json({ ok: false, error: "Недопустимый статус задания" });
+  try {
+    const cfg = await publicConfig();
+    if (!cfg.cabinetEnabled) return res.status(403).json({ ok: false, error: "Кабинет отключён" });
+    const rows = await tbl.list("Homework");
+    const row = rows.find((item) => String(item.id) === id && samePhone(item.phone, phone) && flagOn(item.visible));
+    if (!row) return res.status(404).json({ ok: false, error: "Задание не найдено" });
+    const currentStatus = homeworkStatus(row.status);
+    if (currentStatus === "accepted") return res.status(409).json({ ok: false, error: "Задание уже принято преподавателем" });
+    const now = new Date().toISOString();
+    const patch = desired === "completed"
+      ? { status: "completed", openedAt: row.openedAt || now, completedAt: now, updatedAt: now }
+      : { status: "read", openedAt: row.openedAt || now, completedAt: "", updatedAt: now };
+    await tbl.update("Homework", "id", id, patch);
+    const saved = homeworkView({ ...row, ...patch });
+    if (desired === "completed") {
+      try { await notifyAdmin(`✅ Домашнее задание отмечено выполненным\n👤 ${saved.studentName || "Ученик"} 📞 ${saved.phone}\n📝 ${saved.title}`); }
+      catch (notifyError) { console.error("homework complete notify:", notifyError.message); }
+    }
+    res.json({ ok: true, homework: saved });
+  } catch (error) { console.error("homework status:", error); res.status(500).json({ ok: false, error: "Не удалось сохранить статус" }); }
+});
 
 // ---------- admin ----------
 function needAdmin(req, res, next) {
@@ -1122,8 +1283,8 @@ app.get("/api/admin/students/notes", needAdmin, async (req, res) => {
     res.json({ ok: true, notes });
   } catch (e) { res.status(500).json({ ok: false, error: "notes failed" }); }
 });
-/** Сообщение ученику в кабинет (домашка, ссылка, заметка) + дублируем в Telegram, если привязан.
- *  Флаги sendCab / sendTg позволяют отключить один из каналов. */
+/** Legacy Notes remain a persistent important-message channel. New structured
+ * homework is handled below, while these messages can still be mirrored to Telegram. */
 app.post("/api/admin/students/notes", needAdmin, async (req, res) => {
   const b = req.body || {};
   const text = esc(b.text, 4000).trim(), link = esc(b.link, 500).trim();
@@ -1139,7 +1300,7 @@ app.post("/api/admin/students/notes", needAdmin, async (req, res) => {
       if (st && st.chat_id) chatId = String(st.chat_id);
       if (!chatId) { const u = (await tbl.list("Users")).find((x) => x.phone && samePhone(x.phone, b.phone)); if (u) chatId = String(u.chat_id); }
       if (chatId) {
-        const head = type === "homework" ? "📝 Домашнее задание" : type === "link" ? "🔗 Ссылка" : "ℹ️ Сообщение от преподавателя";
+        const head = type === "homework" ? "📝 Домашнее задание" : type === "link" ? "🔗 Ссылка" : "⚠️ Важное сообщение от преподавателя";
         const r = await tgSend(chatId, `${head}\n\n${text}${link ? `\n${link}` : ""}`);
         tg = r.ok ? "sent" : "failed";
         await storeMessage({ dir: "out", chatId, name: "Преподаватель", text: `${head}: ${text} ${link}`.trim(), status: r.ok ? "ok" : "failed", kind: "note" });
@@ -1153,6 +1314,150 @@ app.delete("/api/admin/students/notes", needAdmin, async (req, res) => {
   if (!id) return res.status(400).json({ ok: false, error: "bad id" });
   try { res.json(await tbl.remove("Notes", "id", id)); }
   catch (e) { res.status(500).json({ ok: false, error: "delete failed" }); }
+});
+
+// ---------- домашние задания ----------
+/**
+ * Homework is intentionally independent from Notes. Notes stay a lightweight,
+ * persistent emergency channel, while Homework records are addressed to one
+ * learner and carry read/completion timestamps that a teacher can monitor.
+ */
+async function homeworkStudent(phone) {
+  const students = await tbl.list("Students");
+  const existing = students.find((student) => samePhone(student.phone, phone));
+  if (existing) return existing;
+  // Older installations can have bookings created before the Students sheet
+  // existed. They are still valid individual recipients in the admin roster.
+  const booking = (await allBookings()).find((item) => samePhone(item.phone, phone));
+  return booking ? { phone: booking.phone, name: booking.name || "", grade: booking.grade || "", subject: booking.subject || "", chat_id: booking.chatId || "" } : null;
+}
+async function homeworkStudentChatId(phone, student) {
+  if (student?.chat_id) return String(student.chat_id);
+  const users = await tbl.list("Users");
+  const user = users.find((item) => item.phone && samePhone(item.phone, phone));
+  return user?.chat_id ? String(user.chat_id) : "";
+}
+function homeworkTelegramCopy(req, item) {
+  const lines = ["📝 Новое домашнее задание", "", item.title];
+  if (item.text) lines.push("", item.text);
+  if (item.dueDate) lines.push("", `Срок: ${toDsp(item.dueDate)}`);
+  const resources = [item.link, ...item.attachments.map((attachment) => homeworkAttachmentPublicUrl(req, attachment))].filter(Boolean);
+  if (resources.length) lines.push("", "Материалы:", ...resources);
+  lines.push("", "Откройте личный кабинет, чтобы прочитать задание и отметить выполнение.");
+  return lines.join("\n").slice(0, 4000);
+}
+
+app.get("/api/admin/homework", needAdmin, async (_req, res) => {
+  try {
+    const rows = await tbl.list("Homework");
+    const homework = rows.filter((row) => flagOn(row.visible)).map(homeworkView)
+      .sort((a, b) => String(b.assignedAt).localeCompare(String(a.assignedAt)));
+    const totals = homework.reduce((result, item) => {
+      result.all += 1;
+      result[item.status] = (result[item.status] || 0) + 1;
+      return result;
+    }, { all: 0, assigned: 0, read: 0, completed: 0, revision: 0, accepted: 0 });
+    res.json({ ok: true, homework, totals });
+  } catch (error) { console.error("homework list:", error); res.status(500).json({ ok: false, error: "Не удалось загрузить домашние задания" }); }
+});
+
+/** Upload a single attachment first, then the composer stores only its link in
+ * Homework. Local demo files are served under /uploads; production delegates
+ * the binary to Apps Script, which puts it on Google Drive. */
+app.post("/api/admin/homework/attachments", needAdmin, async (req, res) => {
+  const body = req.body || {};
+  const name = safeHomeworkFileName(body.name);
+  const mimeType = esc(body.mimeType, 120).replace(/[^A-Za-z0-9.+\-\/_]/g, "");
+  const rawData = String(body.data || "").replace(/\s/g, "");
+  if (!rawData) return res.status(400).json({ ok: false, error: "Выберите файл" });
+  if (!acceptsHomeworkFile(name, mimeType)) return res.status(415).json({ ok: false, error: "Можно прикрепить PDF, изображение, документ, таблицу, презентацию, TXT или ZIP." });
+  if (rawData.length > Math.ceil(HOMEWORK_FILE_MAX_BYTES * 4 / 3) + 8) return res.status(413).json({ ok: false, error: "Размер файла не должен превышать 6 МБ" });
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(rawData)) return res.status(400).json({ ok: false, error: "Не удалось прочитать файл" });
+  try {
+    if (APPS_SCRIPT_URL) {
+      const response = await appsScript("uploadHomeworkAttachment", { name, mimeType, data: rawData }, "POST");
+      const attachment = response && (response.attachment || response.file);
+      if (!response?.ok || !attachment?.url) return res.status(502).json({ ok: false, error: response?.error || "Не удалось загрузить файл на Google Drive" });
+      return res.json({ ok: true, attachment: parseHomeworkAttachments([{ ...attachment, name: attachment.name || name, mimeType: attachment.mimeType || mimeType }])[0] });
+    }
+    const bytes = Buffer.from(rawData, "base64");
+    if (!bytes.length || bytes.length > HOMEWORK_FILE_MAX_BYTES) return res.status(413).json({ ok: false, error: "Размер файла не должен превышать 6 МБ" });
+    fs.mkdirSync(HOMEWORK_UPLOAD_DIR, { recursive: true });
+    const ext = homeworkFileExtension(name);
+    const diskName = `${newId("HW")}-${crypto.randomBytes(6).toString("hex")}${ext}`;
+    fs.writeFileSync(path.join(HOMEWORK_UPLOAD_DIR, diskName), bytes, { flag: "wx" });
+    const attachment = { id: diskName, name, url: `/uploads/${diskName}`, mimeType, size: bytes.length };
+    res.json({ ok: true, attachment });
+  } catch (error) { console.error("homework attachment:", error); res.status(500).json({ ok: false, error: "Не удалось сохранить файл" }); }
+});
+
+app.post("/api/admin/homework", needAdmin, async (req, res) => {
+  const body = req.body || {};
+  const phone = String(body.phone || "");
+  const title = esc(body.title, 220).trim();
+  const text = esc(body.text, 6000).trim();
+  const linkInput = esc(body.link, 1600).trim();
+  const link = safeExternalUrl(linkInput);
+  const dueDate = isDateStr(String(body.dueDate || "")) ? String(body.dueDate) : "";
+  const attachments = parseHomeworkAttachments(body.attachments);
+  if (digits(phone).length < 10) return res.status(400).json({ ok: false, error: "Выберите ученика" });
+  if (!title) return res.status(400).json({ ok: false, error: "Добавьте название задания" });
+  if (!text && !link && !attachments.length) return res.status(400).json({ ok: false, error: "Добавьте инструкцию, ссылку или вложение" });
+  if (linkInput && !link) return res.status(400).json({ ok: false, error: "Укажите корректную ссылку, начинающуюся с https://" });
+  try {
+    const student = await homeworkStudent(phone);
+    if (!student) return res.status(404).json({ ok: false, error: "Карточка ученика не найдена" });
+    const assignedAt = new Date().toISOString();
+    const row = {
+      id: newId("H"), phone, studentName: esc(student.name, 160), title, text, link, dueDate,
+      attachments: JSON.stringify(attachments), status: "assigned", visible: "1", assignedAt,
+      openedAt: "", completedAt: "", returnedAt: "", acceptedAt: "", updatedAt: assignedAt,
+    };
+    await tbl.append("Homework", row);
+    const homework = homeworkView(row);
+    let tg = "skipped";
+    if (body.sendTg) {
+      const chatId = await homeworkStudentChatId(phone, student);
+      if (!chatId) tg = "no-chat";
+      else {
+        const result = await tgSend(chatId, homeworkTelegramCopy(req, homework));
+        tg = result.ok ? "sent" : "failed";
+        await storeMessage({ dir: "out", chatId, name: "Преподаватель", text: `Домашнее задание: ${title}`, status: result.ok ? "ok" : "failed", kind: "homework" });
+      }
+    }
+    try { await notifyAdmin(`📝 Выдано домашнее задание\n👤 ${homework.studentName || "Ученик"} 📞 ${homework.phone}\n${homework.title}${homework.dueDate ? `\nСрок: ${toDsp(homework.dueDate)}` : ""}`); }
+    catch (notifyError) { console.error("homework assignment notify:", notifyError.message); }
+    res.status(201).json({ ok: true, homework, tg });
+  } catch (error) { console.error("homework create:", error); res.status(500).json({ ok: false, error: "Не удалось выдать домашнее задание" }); }
+});
+
+app.patch("/api/admin/homework/:id", needAdmin, async (req, res) => {
+  const id = String(req.params.id || "");
+  const status = String((req.body || {}).status || "");
+  if (!HOMEWORK_STATUSES.has(status)) return res.status(400).json({ ok: false, error: "Недопустимый статус задания" });
+  try {
+    const rows = await tbl.list("Homework");
+    const row = rows.find((item) => String(item.id) === id && flagOn(item.visible));
+    if (!row) return res.status(404).json({ ok: false, error: "Задание не найдено" });
+    const now = new Date().toISOString();
+    const patch = { status, updatedAt: now };
+    if (status === "revision") { patch.returnedAt = now; patch.completedAt = ""; }
+    if (status === "accepted") patch.acceptedAt = now;
+    if (status === "assigned") { patch.openedAt = ""; patch.completedAt = ""; patch.returnedAt = ""; patch.acceptedAt = ""; }
+    await tbl.update("Homework", "id", id, patch);
+    res.json({ ok: true, homework: homeworkView({ ...row, ...patch }) });
+  } catch (error) { console.error("homework update:", error); res.status(500).json({ ok: false, error: "Не удалось обновить статус" }); }
+});
+
+app.delete("/api/admin/homework/:id", needAdmin, async (req, res) => {
+  const id = String(req.params.id || "");
+  if (!id) return res.status(400).json({ ok: false, error: "Не выбрано задание" });
+  try {
+    // Keep Drive/local files intact: a resource may be shared in another task,
+    // while deleting the assignment must immediately hide it from the learner.
+    await tbl.update("Homework", "id", id, { visible: "0", updatedAt: new Date().toISOString() });
+    res.json({ ok: true });
+  } catch (error) { console.error("homework delete:", error); res.status(500).json({ ok: false, error: "Не удалось удалить задание" }); }
 });
 
 // ---------- тесты ----------
@@ -1737,6 +2042,7 @@ app.get([
   "/telegram", "/telegram.html",
   "/test", "/test.html",
 ], (req, res) => res.sendFile(REACT_SHELL));
+app.use("/uploads", express.static(HOMEWORK_UPLOAD_DIR, { fallthrough: true, index: false }));
 app.use(express.static(DIST_DIR, { extensions: ["html"] }));
 // Keep client-side React routes future-proof. API routes are all registered
 // above, so an unknown non-API GET may safely render the landing shell.

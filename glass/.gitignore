@@ -4,3 +4,7 @@ dist/
 .DS_Store
 data/*.json
 !data/.gitkeep
+
+# Runtime homework uploads for local/demo storage (production uses Google Drive)
+data/uploads/*
+!data/uploads/.gitkeep

@@ -15,9 +15,12 @@
  *    развертываниями → ✏️ → Новая версия (иначе сайт видит старый код!).
  * 4. Для напоминаний: один раз запустить функцию createReminderTrigger()
  *    (▶️ в редакторе) и разрешить доступ.
+ * 5. Для вложений к домашним заданиям при желании укажите
+ *    HOMEWORK_DRIVE_FOLDER_ID ниже. После изменения кода создайте новую
+ *    версию развертывания и подтвердите разрешение на Google Drive.
  *
- * v3: перенос занятий учеником, универсальные таблицы (Settings, Users,
- * Messages, Students, Notes) для сервера, исправлена ошибка
+ * v4: перенос занятий, универсальные таблицы (Settings, Users, Messages,
+ * Students, Notes, Homework) и загрузка вложений на Google Drive; исправлена ошибка
  * «You can't set the number format of cells in a typed column».
  */
 
@@ -29,6 +32,10 @@ var SLOTS_SHEET_NAME = "Slots";
 var BOOKINGS_SHEET_NAME = "Bookings";
 var TUTOR_TZ_OFFSET_MIN = 5 * 60; // МСК+2 = UTC+5
 var DEFAULT_DURATION = 50;        // минут
+// Необязательно: ID папки Google Drive для вложений к домашним заданиям.
+// Пусто = корень Google Drive владельца скрипта. Файлам выдаётся доступ
+// «у кого есть ссылка»; если политика домена запрещает это, загрузка вернёт ошибку.
+var HOMEWORK_DRIVE_FOLDER_ID = "";
 
 var NEW_SLOT_HEADERS = ["date", "time", "duration", "status", "student", "email", "phone", "subject", "chat_id", "reminded"];
 var NEW_BOOK_HEADERS = ["id", "createdAt", "date", "time", "subject", "duration", "name", "email", "phone", "grade", "comment", "contact", "chat_id", "source", "status"];
@@ -1029,6 +1036,46 @@ function testAnswer_(p) {
   return out;
 }
 
+// ---------- вложения домашних заданий ----------
+function safeHomeworkFileName_(name) {
+  var out = String(name || "attachment").replace(/[\\/:*?"<>|\x00-\x1f]/g, "-").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+  return (out || "attachment").slice(0, 140);
+}
+function homeworkFileAllowed_(name, mimeType) {
+  var ext = String(name || "").toLowerCase().match(/\.[a-z0-9]+$/);
+  ext = ext ? ext[0] : "";
+  var allowed = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp", ".zip"];
+  if (allowed.indexOf(ext) !== -1) return true;
+  return /^(image\/(png|jpeg|webp|gif)|application\/(pdf|msword|vnd\.(openxmlformats-officedocument|ms-excel|ms-powerpoint)|vnd\.oasis\.opendocument)|text\/plain)$/i.test(String(mimeType || ""));
+}
+/** Принимает base64 от защищённого Render-сервера и возвращает обычную Drive-ссылку.
+ * Ссылка сохраняется в листе Homework, а не сам base64, поэтому таблица остаётся лёгкой. */
+function uploadHomeworkAttachment_(p) {
+  var name = safeHomeworkFileName_(p.name);
+  var mimeType = String(p.mimeType || "application/octet-stream").slice(0, 120);
+  var data = String(p.data || "").replace(/\s/g, "");
+  if (!data) return { ok: false, error: "Выберите файл" };
+  if (!homeworkFileAllowed_(name, mimeType)) return { ok: false, error: "Поддерживаются PDF, изображения, документы, таблицы, презентации, TXT и ZIP" };
+  // Base64 занимает примерно 4/3 размера бинарного файла. Лимит совпадает с сервером: 6 МБ.
+  if (data.length > Math.ceil(6 * 1024 * 1024 * 4 / 3) + 8) return { ok: false, error: "Размер файла не должен превышать 6 МБ" };
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(data)) return { ok: false, error: "Не удалось прочитать файл" };
+  try {
+    var bytes = Utilities.base64Decode(data);
+    if (!bytes.length || bytes.length > 6 * 1024 * 1024) return { ok: false, error: "Размер файла не должен превышать 6 МБ" };
+    var blob = Utilities.newBlob(bytes, mimeType, name);
+    var folder = HOMEWORK_DRIVE_FOLDER_ID ? DriveApp.getFolderById(HOMEWORK_DRIVE_FOLDER_ID) : DriveApp.getRootFolder();
+    var file = folder.createFile(blob);
+    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); }
+    catch (sharingError) {
+      try { file.setTrashed(true); } catch (cleanupError) {}
+      return { ok: false, error: "Файл загружен, но Google Drive не разрешил доступ по ссылке. Проверьте политику доступа папки." };
+    }
+    return { ok: true, attachment: {
+      id: file.getId(), name: file.getName(), url: file.getUrl(), mimeType: mimeType, size: bytes.length
+    } };
+  } catch (err) { return { ok: false, error: "Не удалось загрузить файл на Google Drive: " + String(err) }; }
+}
+
 // ---------- entry ----------
 function route_(p) {
   if (!check_(p)) return { ok: false, error: "forbidden" };
@@ -1055,6 +1102,7 @@ function route_(p) {
   if (a === "generateSlots") return generateSlots_(p);
   if (a === "clearRange") return clearRange_(p);
   if (a === "cleanupPast") return cleanupPast_();
+  if (a === "uploadHomeworkAttachment") return uploadHomeworkAttachment_(p);
   return { ok: false, error: "unknown action" };
 }
 
